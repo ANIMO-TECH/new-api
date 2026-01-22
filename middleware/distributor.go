@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -12,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/service"
@@ -259,13 +259,16 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 	if strings.HasPrefix(c.Request.URL.Path, "/v1/images/generations") {
 		modelRequest.Model = common.GetStringIfEmpty(modelRequest.Model, "dall-e")
 	} else if strings.HasPrefix(c.Request.URL.Path, "/v1/images/edits") {
-		//modelRequest.Model = common.GetStringIfEmpty(c.PostForm("model"), "gpt-image-1")
-		contentType := c.ContentType()
-		if slices.Contains([]string{gin.MIMEPOSTForm, gin.MIMEMultipartPOSTForm}, contentType) {
-			req, err := getModelFromRequest(c)
-			if err == nil && req.Model != "" {
-				modelRequest.Model = req.Model
+		// 支持两种格式：multipart/form-data 和 application/json
+		// getModelFromRequest 会自动根据 Content-Type 处理
+		req, err := getModelFromRequest(c)
+		if err == nil && req.Model != "" {
+			modelRequest.Model = req.Model
+			if common.DebugEnabled {
+				logger.LogDebug(c, fmt.Sprintf("[/v1/images/edits] parsed model: %s (content-type: %s)", req.Model, c.ContentType()))
 			}
+		} else if err != nil && common.DebugEnabled {
+			logger.LogDebug(c, fmt.Sprintf("[/v1/images/edits] failed to parse model: %v (content-type: %s)", err, c.ContentType()))
 		}
 	}
 	if strings.HasPrefix(c.Request.URL.Path, "/v1/audio") {
