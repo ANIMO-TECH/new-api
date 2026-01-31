@@ -28,11 +28,16 @@ RUN go build -ldflags "-s -w -X 'github.com/QuantumNous/new-api/common.Version=$
 FROM debian:bookworm-slim
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates tzdata libasan8 wget \
+    && apt-get install -y --no-install-recommends ca-certificates tzdata libasan8 wget curl \
     && rm -rf /var/lib/apt/lists/* \
     && update-ca-certificates
 
 COPY --from=builder2 /build/new-api /
 EXPOSE 3000
 WORKDIR /data
+
+# 添加健康检查
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 --start-period=60s \
+  CMD curl -f http://localhost:3000/api/status || exit 1
+
 ENTRYPOINT ["/new-api"]
