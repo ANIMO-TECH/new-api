@@ -178,6 +178,15 @@ func testChannel(channel *model.Channel, testModel string, endpointType string) 
 	}
 
 	request := buildTestRequest(testModel, endpointType, channel)
+	if testRequestBody, err := model.GetModelTestRequestBodyByName(testModel); err != nil {
+		return testResult{context: c, localErr: err, newAPIError: types.NewError(err, types.ErrorCodeInvalidRequest)}
+	} else if testRequestBody != nil && strings.TrimSpace(*testRequestBody) != "" {
+		overridden, err := parseTestRequestOverride(*testRequestBody, testModel, endpointType, channel)
+		if err != nil {
+			return testResult{context: c, localErr: err, newAPIError: types.NewError(err, types.ErrorCodeInvalidRequest)}
+		}
+		request = overridden
+	}
 
 	info, err := relaycommon.GenRelayInfo(c, relayFormat, request, nil)
 
@@ -419,6 +428,62 @@ func testChannel(channel *model.Channel, testModel string, endpointType string) 
 		context:     c,
 		localErr:    nil,
 		newAPIError: nil,
+	}
+}
+
+func parseTestRequestOverride(body string, testModel string, endpointType string, channel *model.Channel) (dto.Request, error) {
+	trimmed := strings.TrimSpace(body)
+	if trimmed == "" {
+		return nil, errors.New("empty test_request_body")
+	}
+
+	// If endpointType is not provided, best-effort parse as chat request.
+	// This matches existing behavior where channel tests mostly use chat completions.
+	if endpointType == "" {
+		var req dto.GeneralOpenAIRequest
+		if err := json.Unmarshal([]byte(trimmed), &req); err != nil {
+			return nil, err
+		}
+		req.Model = testModel
+		return &req, nil
+	}
+
+	switch constant.EndpointType(endpointType) {
+	case constant.EndpointTypeEmbeddings:
+		var req dto.EmbeddingRequest
+		if err := json.Unmarshal([]byte(trimmed), &req); err != nil {
+			return nil, err
+		}
+		req.Model = testModel
+		return &req, nil
+	case constant.EndpointTypeImageGeneration:
+		var req dto.ImageRequest
+		if err := json.Unmarshal([]byte(trimmed), &req); err != nil {
+			return nil, err
+		}
+		req.Model = testModel
+		return &req, nil
+	case constant.EndpointTypeJinaRerank:
+		var req dto.RerankRequest
+		if err := json.Unmarshal([]byte(trimmed), &req); err != nil {
+			return nil, err
+		}
+		req.Model = testModel
+		return &req, nil
+	case constant.EndpointTypeOpenAIResponse:
+		var req dto.OpenAIResponsesRequest
+		if err := json.Unmarshal([]byte(trimmed), &req); err != nil {
+			return nil, err
+		}
+		req.Model = testModel
+		return &req, nil
+	default:
+		var req dto.GeneralOpenAIRequest
+		if err := json.Unmarshal([]byte(trimmed), &req); err != nil {
+			return nil, err
+		}
+		req.Model = testModel
+		return &req, nil
 	}
 }
 

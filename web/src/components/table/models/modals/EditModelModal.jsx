@@ -123,6 +123,9 @@ const EditModelModal = (props) => {
     name_rule: props.editingModel?.model_name ? 0 : undefined, // 通过未配置模型过来的固定为精确匹配
     status: true,
     sync_official: true,
+
+    use_test_request_body: false,
+    test_request_body: '',
   });
 
   const handleCancel = () => {
@@ -150,6 +153,9 @@ const EditModelModal = (props) => {
         // 处理status/sync_official，将数字转为布尔值
         data.status = data.status === 1;
         data.sync_official = (data.sync_official ?? 1) === 1;
+
+        data.use_test_request_body =
+          !!data.test_request_body && String(data.test_request_body).trim() !== '';
         if (formApiRef.current) {
           formApiRef.current.setValues({ ...getInitValues(), ...data });
         }
@@ -197,6 +203,9 @@ const EditModelModal = (props) => {
         endpoints: values.endpoints || '',
         status: values.status ? 1 : 0,
         sync_official: values.sync_official ? 1 : 0,
+        test_request_body: values.use_test_request_body
+          ? values.test_request_body || ''
+          : '',
       };
 
       if (isEdit) {
@@ -226,6 +235,31 @@ const EditModelModal = (props) => {
     }
     setLoading(false);
     formApiRef.current?.setValues(getInitValues());
+  };
+
+  const fillDefaultTestRequestBody = async () => {
+    const values = formApiRef.current?.getValues?.() || {};
+    const modelName = values.model_name?.trim();
+    if (!modelName) {
+      showError(t('请先填写模型名称'));
+      return;
+    }
+    try {
+      const res = await API.get(
+        `/api/models/test_request_template?model_name=${encodeURIComponent(modelName)}`,
+      );
+      const { success, message, data } = res.data;
+      if (!success) {
+        showError(message || t('获取默认测试请求失败'));
+        return;
+      }
+      formApiRef.current?.setValue(
+        'test_request_body',
+        data?.test_request_body || '',
+      );
+    } catch (e) {
+      showError(t('获取默认测试请求失败'));
+    }
   };
 
   return (
@@ -523,6 +557,58 @@ const EditModelModal = (props) => {
                         )
                       }
                     />
+                  </Col>
+                  <Col span={24}>
+                    <Card className='mb-2' title={t('测试请求覆盖')}>
+                      <Form.Switch
+                        field='use_test_request_body'
+                        label={t('覆盖默认测试请求')}
+                        extraText={t(
+                          '开启后，将使用此 JSON 作为测试请求体（覆盖系统默认模板）',
+                        )}
+                        size='large'
+                      />
+                      <Space className='mb-2'>
+                        <Button
+                          icon={<FileText size={16} />}
+                          onClick={fillDefaultTestRequestBody}
+                          disabled={!values.use_test_request_body}
+                        >
+                          {t('填充默认')}
+                        </Button>
+                        <Button
+                          type='tertiary'
+                          onClick={() =>
+                            formApiRef.current?.setValue('test_request_body', '')
+                          }
+                          disabled={!values.use_test_request_body}
+                        >
+                          {t('清空')}
+                        </Button>
+                      </Space>
+                      <div
+                        style={{
+                          opacity: values.use_test_request_body ? 1 : 0.5,
+                          pointerEvents: values.use_test_request_body
+                            ? 'auto'
+                            : 'none',
+                        }}
+                      >
+                        <JSONEditor
+                          field='test_request_body'
+                          value={values.test_request_body}
+                          onChange={(val) =>
+                            formApiRef.current?.setValue(
+                              'test_request_body',
+                              val,
+                            )
+                          }
+                          formApi={formApiRef.current}
+                          editorType='object'
+                          extraText={t('仅用于渠道/通道测试请求体')}
+                        />
+                      </div>
+                    </Card>
                   </Col>
                   <Col span={24}>
                     <Form.Switch

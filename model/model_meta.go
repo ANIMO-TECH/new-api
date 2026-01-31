@@ -34,10 +34,11 @@ type Model struct {
 	UpdatedTime  int64          `json:"updated_time" gorm:"bigint"`
 	DeletedAt    gorm.DeletedAt `json:"-" gorm:"index;uniqueIndex:uk_model_name_delete_at,priority:2"`
 
-	BoundChannels []BoundChannel `json:"bound_channels,omitempty" gorm:"-"`
-	EnableGroups  []string       `json:"enable_groups,omitempty" gorm:"-"`
-	QuotaTypes    []int          `json:"quota_types,omitempty" gorm:"-"`
-	NameRule      int            `json:"name_rule" gorm:"default:0"`
+	BoundChannels   []BoundChannel `json:"bound_channels,omitempty" gorm:"-"`
+	EnableGroups    []string       `json:"enable_groups,omitempty" gorm:"-"`
+	QuotaTypes      []int          `json:"quota_types,omitempty" gorm:"-"`
+	NameRule        int            `json:"name_rule" gorm:"default:0"`
+	TestRequestBody *string        `json:"test_request_body,omitempty" gorm:"type:text"`
 
 	MatchedModels []string `json:"matched_models,omitempty" gorm:"-"`
 	MatchedCount  int      `json:"matched_count,omitempty" gorm:"-"`
@@ -145,4 +146,20 @@ func SearchModels(keyword string, vendor string, offset int, limit int) ([]*Mode
 		return nil, 0, err
 	}
 	return models, total, nil
+}
+
+func GetModelTestRequestBodyByName(modelName string) (*string, error) {
+	if modelName == "" {
+		return nil, nil
+	}
+	var m Model
+	// Only exact match is supported for test request override.
+	err := DB.Select("test_request_body").Where("model_name = ?", modelName).First(&m).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return m.TestRequestBody, nil
 }
