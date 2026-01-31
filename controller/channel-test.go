@@ -40,6 +40,8 @@ type testResult struct {
 	newAPIError *types.NewAPIError
 }
 
+var errSkipChannelTest = errors.New("skip channel test: no test model")
+
 func testChannel(channel *model.Channel, testModel string, endpointType string) testResult {
 	tik := time.Now()
 	var unsupportedTestChannelTypes = []int{
@@ -65,13 +67,7 @@ func testChannel(channel *model.Channel, testModel string, endpointType string) 
 		if channel.TestModel != nil && *channel.TestModel != "" {
 			testModel = strings.TrimSpace(*channel.TestModel)
 		} else {
-			models := channel.GetModels()
-			if len(models) > 0 {
-				testModel = strings.TrimSpace(models[0])
-			}
-			if testModel == "" {
-				testModel = "gpt-4o-mini"
-			}
+			return testResult{localErr: errSkipChannelTest}
 		}
 	}
 
@@ -560,6 +556,15 @@ func TestChannel(c *gin.Context) {
 	tik := time.Now()
 	result := testChannel(channel, testModel, endpointType)
 	if result.localErr != nil {
+		if errors.Is(result.localErr, errSkipChannelTest) {
+			c.JSON(http.StatusOK, gin.H{
+				"success": true,
+				"message": "",
+				"time":    0.0,
+				"skipped": true,
+			})
+			return
+		}
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
 			"message": result.localErr.Error(),
@@ -618,6 +623,9 @@ func testAllChannels(notify bool) error {
 			isChannelEnabled := channel.Status == common.ChannelStatusEnabled
 			tik := time.Now()
 			result := testChannel(channel, "", "")
+			if errors.Is(result.localErr, errSkipChannelTest) {
+				continue
+			}
 			tok := time.Now()
 			milliseconds := tok.Sub(tik).Milliseconds()
 
