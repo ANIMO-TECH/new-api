@@ -42,8 +42,39 @@ type testResult struct {
 
 var errSkipChannelTest = errors.New("skip channel test: no test model")
 
+func recordFailedChannelTestLog(c *gin.Context, channel *model.Channel, modelName string, startedAt time.Time, other map[string]any, reason string) {
+	if c == nil || channel == nil {
+		return
+	}
+	useTimeSeconds := int(time.Since(startedAt).Seconds())
+	if useTimeSeconds < 0 {
+		useTimeSeconds = 0
+	}
+	if other == nil {
+		other = map[string]any{}
+	}
+	if reason != "" {
+		other["error"] = reason
+	}
+	model.RecordConsumeLog(c, 1, model.RecordConsumeLogParams{
+		ChannelId:        channel.Id,
+		PromptTokens:     0,
+		CompletionTokens: 0,
+		ModelName:        modelName,
+		TokenName:        "模型测试",
+		Quota:            0,
+		Content:          "模型测试（失败）",
+		UseTimeSeconds:   useTimeSeconds,
+		IsStream:         false,
+		Group:            c.GetString("group"),
+		Other:            other,
+	})
+}
+
 func testChannel(channel *model.Channel, testModel string, endpointType string) testResult {
 	tik := time.Now()
+	var recordedConsumeLog bool
+	var logOther map[string]any
 	var unsupportedTestChannelTypes = []int{
 		constant.ChannelTypeMidjourney,
 		constant.ChannelTypeMidjourneyPlus,
@@ -70,6 +101,12 @@ func testChannel(channel *model.Channel, testModel string, endpointType string) 
 			return testResult{localErr: errSkipChannelTest}
 		}
 	}
+	defer func() {
+		if recordedConsumeLog {
+			return
+		}
+		recordFailedChannelTestLog(c, channel, testModel, tik, logOther, "")
+	}()
 
 	requestPath := "/v1/chat/completions"
 
@@ -109,6 +146,8 @@ func testChannel(channel *model.Channel, testModel string, endpointType string) 
 
 	cache, err := model.GetUserCache(1)
 	if err != nil {
+		recordFailedChannelTestLog(c, channel, testModel, tik, logOther, err.Error())
+		recordedConsumeLog = true
 		return testResult{
 			localErr:    err,
 			newAPIError: nil,
@@ -125,6 +164,8 @@ func testChannel(channel *model.Channel, testModel string, endpointType string) 
 
 	newAPIError := middleware.SetupContextForSelectedChannel(c, channel, testModel)
 	if newAPIError != nil {
+		recordFailedChannelTestLog(c, channel, testModel, tik, logOther, newAPIError.Error())
+		recordedConsumeLog = true
 		return testResult{
 			context:     c,
 			localErr:    newAPIError,
@@ -179,10 +220,14 @@ func testChannel(channel *model.Channel, testModel string, endpointType string) 
 
 	request := buildTestRequest(testModel, endpointType, channel)
 	if testRequestBody, err := model.GetModelTestRequestBodyByName(testModel); err != nil {
+		recordFailedChannelTestLog(c, channel, testModel, tik, logOther, err.Error())
+		recordedConsumeLog = true
 		return testResult{context: c, localErr: err, newAPIError: types.NewError(err, types.ErrorCodeInvalidRequest)}
 	} else if testRequestBody != nil && strings.TrimSpace(*testRequestBody) != "" {
 		overridden, err := parseTestRequestOverride(*testRequestBody, testModel, relayFormat)
 		if err != nil {
+			recordFailedChannelTestLog(c, channel, testModel, tik, logOther, err.Error())
+			recordedConsumeLog = true
 			return testResult{context: c, localErr: err, newAPIError: types.NewError(err, types.ErrorCodeInvalidRequest)}
 		}
 		request = overridden
@@ -191,6 +236,8 @@ func testChannel(channel *model.Channel, testModel string, endpointType string) 
 	info, err := relaycommon.GenRelayInfo(c, relayFormat, request, nil)
 
 	if err != nil {
+		recordFailedChannelTestLog(c, channel, testModel, tik, logOther, err.Error())
+		recordedConsumeLog = true
 		return testResult{
 			context:     c,
 			localErr:    err,
@@ -203,6 +250,8 @@ func testChannel(channel *model.Channel, testModel string, endpointType string) 
 
 	err = helper.ModelMappedHelper(c, info, request)
 	if err != nil {
+		recordFailedChannelTestLog(c, channel, testModel, tik, logOther, err.Error())
+		recordedConsumeLog = true
 		return testResult{
 			context:     c,
 			localErr:    err,
@@ -217,6 +266,8 @@ func testChannel(channel *model.Channel, testModel string, endpointType string) 
 	apiType, _ := common.ChannelType2APIType(channel.Type)
 	adaptor := relay.GetAdaptor(apiType)
 	if adaptor == nil {
+		recordFailedChannelTestLog(c, channel, testModel, tik, logOther, fmt.Sprintf("invalid api type: %d, adaptor is nil", apiType))
+		recordedConsumeLog = true
 		return testResult{
 			context:     c,
 			localErr:    fmt.Errorf("invalid api type: %d, adaptor is nil", apiType),
@@ -231,6 +282,8 @@ func testChannel(channel *model.Channel, testModel string, endpointType string) 
 
 	priceData, err := helper.ModelPriceHelper(c, info, 0, request.GetTokenCountMeta())
 	if err != nil {
+		recordFailedChannelTestLog(c, channel, testModel, tik, logOther, err.Error())
+		recordedConsumeLog = true
 		return testResult{
 			context:     c,
 			localErr:    err,
@@ -301,6 +354,8 @@ func testChannel(channel *model.Channel, testModel string, endpointType string) 
 	}
 
 	if err != nil {
+		recordFailedChannelTestLog(c, channel, testModel, tik, logOther, err.Error())
+		recordedConsumeLog = true
 		return testResult{
 			context:     c,
 			localErr:    err,
@@ -309,6 +364,8 @@ func testChannel(channel *model.Channel, testModel string, endpointType string) 
 	}
 	jsonData, err := json.Marshal(convertedRequest)
 	if err != nil {
+		recordFailedChannelTestLog(c, channel, testModel, tik, logOther, err.Error())
+		recordedConsumeLog = true
 		return testResult{
 			context:     c,
 			localErr:    err,
@@ -328,6 +385,8 @@ func testChannel(channel *model.Channel, testModel string, endpointType string) 
 	if len(info.ParamOverride) > 0 {
 		jsonData, err = relaycommon.ApplyParamOverride(jsonData, info.ParamOverride, relaycommon.BuildParamOverrideContext(info))
 		if err != nil {
+			recordFailedChannelTestLog(c, channel, testModel, tik, logOther, err.Error())
+			recordedConsumeLog = true
 			return testResult{
 				context:     c,
 				localErr:    err,
@@ -340,6 +399,8 @@ func testChannel(channel *model.Channel, testModel string, endpointType string) 
 	c.Request.Body = io.NopCloser(requestBody)
 	resp, err := adaptor.DoRequest(c, info, requestBody)
 	if err != nil {
+		recordFailedChannelTestLog(c, channel, testModel, tik, logOther, err.Error())
+		recordedConsumeLog = true
 		return testResult{
 			context:     c,
 			localErr:    err,
@@ -361,6 +422,8 @@ func testChannel(channel *model.Channel, testModel string, endpointType string) 
 				httpResp.StatusCode,
 				err,
 			))
+			recordFailedChannelTestLog(c, channel, testModel, tik, logOther, err.Error())
+			recordedConsumeLog = true
 			return testResult{
 				context:     c,
 				localErr:    err,
@@ -370,6 +433,8 @@ func testChannel(channel *model.Channel, testModel string, endpointType string) 
 	}
 	usageA, respErr := adaptor.DoResponse(c, httpResp, info)
 	if respErr != nil {
+		recordFailedChannelTestLog(c, channel, testModel, tik, logOther, respErr.Error())
+		recordedConsumeLog = true
 		return testResult{
 			context:     c,
 			localErr:    respErr,
@@ -377,6 +442,8 @@ func testChannel(channel *model.Channel, testModel string, endpointType string) 
 		}
 	}
 	if usageA == nil {
+		recordFailedChannelTestLog(c, channel, testModel, tik, logOther, "usage is nil")
+		recordedConsumeLog = true
 		return testResult{
 			context:     c,
 			localErr:    errors.New("usage is nil"),
@@ -387,6 +454,8 @@ func testChannel(channel *model.Channel, testModel string, endpointType string) 
 	result := w.Result()
 	respBody, err := io.ReadAll(result.Body)
 	if err != nil {
+		recordFailedChannelTestLog(c, channel, testModel, tik, logOther, err.Error())
+		recordedConsumeLog = true
 		return testResult{
 			context:     c,
 			localErr:    err,
@@ -423,6 +492,7 @@ func testChannel(channel *model.Channel, testModel string, endpointType string) 
 		Group:            info.UsingGroup,
 		Other:            other,
 	})
+	recordedConsumeLog = true
 	common.SysLog(fmt.Sprintf("testing channel #%d, response: \n%s", channel.Id, string(respBody)))
 	return testResult{
 		context:     c,
