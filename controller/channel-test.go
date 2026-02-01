@@ -230,12 +230,8 @@ func testChannel(channel *model.Channel, testModel string, endpointType string) 
 	}
 
 	request := buildTestRequest(testModel, endpointType, channel)
-	if testRequestBody, err := model.GetModelTestRequestBodyByName(testModel); err != nil {
-		recordFailedChannelTestLog(c, channel, testModel, tik, logOther, err.Error())
-		recordedConsumeLog = true
-		return testResult{context: c, localErr: err, newAPIError: types.NewError(err, types.ErrorCodeInvalidRequest)}
-	} else if testRequestBody != nil && strings.TrimSpace(*testRequestBody) != "" {
-		overridden, err := parseTestRequestOverride(*testRequestBody, testModel, relayFormat)
+	if channel.TestRequestBody != nil && strings.TrimSpace(*channel.TestRequestBody) != "" {
+		overridden, err := parseTestRequestOverride(*channel.TestRequestBody, testModel, relayFormat)
 		if err != nil {
 			recordFailedChannelTestLog(c, channel, testModel, tik, logOther, err.Error())
 			recordedConsumeLog = true

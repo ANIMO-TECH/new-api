@@ -145,6 +145,8 @@ const EditChannelModal = (props) => {
     auto_ban: 1,
     test_model: '',
     test_endpoint_type: '',
+    use_test_request_body: false,
+    test_request_body: '',
     groups: ['default'],
     priority: 0,
     weight: 0,
@@ -649,6 +651,9 @@ const EditChannelModal = (props) => {
         data.base_url = 'https://ark.cn-beijing.volces.com/api/v3';
       }
 
+      data.use_test_request_body =
+        !!data.test_request_body && String(data.test_request_body).trim() !== '';
+
       setInputs(data);
       if (formApiRef.current) {
         formApiRef.current.setValues(data);
@@ -1114,6 +1119,11 @@ const EditChannelModal = (props) => {
   const submit = async () => {
     const formValues = formApiRef.current ? formApiRef.current.getValues() : {};
     let localInputs = { ...formValues };
+
+    localInputs.test_request_body = localInputs.use_test_request_body
+      ? localInputs.test_request_body || ''
+      : '';
+    delete localInputs.use_test_request_body;
 
     if (localInputs.type === 57) {
       if (batch) {
@@ -2828,6 +2838,47 @@ const EditChannelModal = (props) => {
                         handleInputChange('test_endpoint_type', value)
                       }
                     />
+
+                    <Card className='mb-2' title={t('测试请求覆盖')}>
+                      <Form.Switch
+                        field='use_test_request_body'
+                        label={t('覆盖默认测试请求')}
+                        extraText={t(
+                          '开启后，将使用此 JSON 作为测试请求体（覆盖系统默认模板）',
+                        )}
+                        size='large'
+                        onChange={(value) =>
+                          handleInputChange('use_test_request_body', value)
+                        }
+                      />
+                      <Form.TextArea
+                        field='test_request_body'
+                        label={t('测试请求体（JSON）')}
+                        placeholder={t('请输入 JSON')}
+                        rows={10}
+                        showClear
+                        disabled={!inputs.use_test_request_body}
+                        onChange={(value) =>
+                          handleInputChange('test_request_body', value)
+                        }
+                        rules={[
+                          {
+                            validator: (_, value) => {
+                              if (!inputs.use_test_request_body) return true;
+                              const text = String(value || '').trim();
+                              if (text === '') return true;
+                              try {
+                                JSON.parse(text);
+                                return true;
+                              } catch {
+                                return false;
+                              }
+                            },
+                            message: t('JSON 格式错误'),
+                          },
+                        ]}
+                      />
+                    </Card>
 
                     <JSONEditor
                       key={`model_mapping-${isEdit ? channelId : 'new'}`}
