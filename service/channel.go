@@ -101,14 +101,16 @@ func ShouldDisableChannel(channelType int, err *types.NewAPIError) bool {
 	return search
 }
 
-func ShouldEnableChannel(newAPIError *types.NewAPIError, status int) bool {
+func ShouldEnableChannel(status int, shouldBanChannel bool) bool {
 	if !common.AutomaticEnableChannelEnabled {
 		return false
 	}
-	if newAPIError != nil {
+	if status != common.ChannelStatusAutoDisabled {
 		return false
 	}
-	if status != common.ChannelStatusAutoDisabled {
+	// Strategy A: allow re-enable for auto-disabled channels when the latest
+	// test does NOT hit a disable condition.
+	if shouldBanChannel {
 		return false
 	}
 	return true
