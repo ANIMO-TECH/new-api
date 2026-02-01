@@ -872,16 +872,13 @@ export const useChannelsData = () => {
       return Promise.resolve();
     }
 
-    // 添加到正在测试的模型集合
-    setTestingModels((prev) => new Set([...prev, model]));
-
     try {
-      if (!model || String(model).trim() === '') {
-        showError(t('该通道未配置测试模型，请先在通道设置中填写“默认测试模型”。'));
-        return;
-      }
+      // 添加到正在测试的模型集合（这里保留原始 model 展示用）
+      setTestingModels((prev) => new Set([...prev, model]));
 
-      let url = `/api/channel/test/${record.id}?model=${model}`;
+      let url = `/api/channel/test/${record.id}?model=${encodeURIComponent(
+        String(model || ''),
+      )}`;
       if (endpointType) {
         url += `&endpoint_type=${endpointType}`;
       }
@@ -892,7 +889,12 @@ export const useChannelsData = () => {
         return Promise.resolve();
       }
 
-      const { success, message, time } = res.data;
+      const { success, message, time, skipped } = res.data;
+
+      if (skipped) {
+        showError(t('该通道未配置测试模型，请先在通道设置中填写“默认测试模型”。'));
+        return;
+      }
 
       // 更新测试结果
       setModelTestResults((prev) => ({
