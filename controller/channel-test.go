@@ -181,7 +181,7 @@ func testChannel(channel *model.Channel, testModel string, endpointType string) 
 	if testRequestBody, err := model.GetModelTestRequestBodyByName(testModel); err != nil {
 		return testResult{context: c, localErr: err, newAPIError: types.NewError(err, types.ErrorCodeInvalidRequest)}
 	} else if testRequestBody != nil && strings.TrimSpace(*testRequestBody) != "" {
-		overridden, err := parseTestRequestOverride(*testRequestBody, testModel, endpointType, channel)
+		overridden, err := parseTestRequestOverride(*testRequestBody, testModel)
 		if err != nil {
 			return testResult{context: c, localErr: err, newAPIError: types.NewError(err, types.ErrorCodeInvalidRequest)}
 		}
@@ -431,170 +431,138 @@ func testChannel(channel *model.Channel, testModel string, endpointType string) 
 	}
 }
 
-func parseTestRequestOverride(body string, testModel string, endpointType string, channel *model.Channel) (dto.Request, error) {
+func parseTestRequestOverride(body string, testModel string) (dto.Request, error) {
 	trimmed := strings.TrimSpace(body)
 	if trimmed == "" {
 		return nil, errors.New("empty test_request_body")
 	}
 
-	// If endpointType is not provided, best-effort parse as chat request.
-	// This matches existing behavior where channel tests mostly use chat completions.
-	if endpointType == "" {
-		var req dto.GeneralOpenAIRequest
-		if err := json.Unmarshal([]byte(trimmed), &req); err != nil {
-			return nil, err
-		}
-		req.Model = testModel
-		return &req, nil
-	}
-
-	switch constant.EndpointType(endpointType) {
-	case constant.EndpointTypeEmbeddings:
-		var req dto.EmbeddingRequest
-		if err := json.Unmarshal([]byte(trimmed), &req); err != nil {
-			return nil, err
-		}
-		req.Model = testModel
-		return &req, nil
-	case constant.EndpointTypeImageGeneration:
-		var req dto.ImageRequest
-		if err := json.Unmarshal([]byte(trimmed), &req); err != nil {
-			return nil, err
-		}
-		req.Model = testModel
-		return &req, nil
-	case constant.EndpointTypeJinaRerank:
-		var req dto.RerankRequest
-		if err := json.Unmarshal([]byte(trimmed), &req); err != nil {
-			return nil, err
-		}
-		req.Model = testModel
-		return &req, nil
-	case constant.EndpointTypeOpenAIResponse:
-		var req dto.OpenAIResponsesRequest
-		if err := json.Unmarshal([]byte(trimmed), &req); err != nil {
-			return nil, err
-		}
-		req.Model = testModel
-		return &req, nil
-	default:
-		var req dto.GeneralOpenAIRequest
-		if err := json.Unmarshal([]byte(trimmed), &req); err != nil {
-			return nil, err
-		}
-		req.Model = testModel
-		return &req, nil
-	}
-}
-
-func buildTestRequest(model string, endpointType string, channel *model.Channel) dto.Request {
-	// 根据端点类型构建不同的测试请求
-	if endpointType != "" {
-		switch constant.EndpointType(endpointType) {
-		case constant.EndpointTypeEmbeddings:
-			// 返回 EmbeddingRequest
-			return &dto.EmbeddingRequest{
-				Model: model,
-				Input: []any{"hello world"},
+	// Parse without relying on endpoint type. The actual relay mode (and request
+	// validation) is derived later from request path + relay info.
+	// We try known request shapes in order to keep it aligned with subsequent
+	// relay format / mode detection.
+	parsers := []func() (dto.Request, error){
+		func() (dto.Request, error) {
+			var req dto.GeneralOpenAIRequest
+			if err := json.Unmarshal([]byte(trimmed), &req); err != nil {
+				return nil, err
 			}
-		case constant.EndpointTypeImageGeneration:
-			// 返回 ImageRequest
-			return &dto.ImageRequest{
-				Model:  model,
-				Prompt: "a cute cat",
-				N:      1,
-				Size:   "1024x1024",
+			req.Model = testModel
+			return &req, nil
+		},
+		func() (dto.Request, error) {
+			var req dto.OpenAIResponsesRequest
+			if err := json.Unmarshal([]byte(trimmed), &req); err != nil {
+				return nil, err
 			}
-		case constant.EndpointTypeJinaRerank:
-			// 返回 RerankRequest
-			return &dto.RerankRequest{
-				Model:     model,
-				Query:     "What is Deep Learning?",
-				Documents: []any{"Deep Learning is a subset of machine learning.", "Machine learning is a field of artificial intelligence."},
-				TopN:      2,
+			req.Model = testModel
+			return &req, nil
+		},
+		func() (dto.Request, error) {
+			var req dto.EmbeddingRequest
+			if err := json.Unmarshal([]byte(trimmed), &req); err != nil {
+				return nil, err
 			}
-		case constant.EndpointTypeOpenAIResponse:
-			// 返回 OpenAIResponsesRequest
-			return &dto.OpenAIResponsesRequest{
-				Model: model,
-				Input: json.RawMessage("\"hi\""),
+			req.Model = testModel
+			return &req, nil
+		},
+		func() (dto.Request, error) {
+			var req dto.RerankRequest
+			if err := json.Unmarshal([]byte(trimmed), &req); err != nil {
+				return nil, err
 			}
-		case constant.EndpointTypeAnthropic, constant.EndpointTypeGemini, constant.EndpointTypeOpenAI:
-			// 返回 GeneralOpenAIRequest
-			maxTokens := uint(16)
-			if constant.EndpointType(endpointType) == constant.EndpointTypeGemini {
-				maxTokens = 3000
+			req.Model = testModel
+			return &req, nil
+		},
+		func() (dto.Request, error) {
+			var req dto.ImageRequest
+			if err := json.Unmarshal([]byte(trimmed), &req); err != nil {
+				return nil, err
 			}
-			return &dto.GeneralOpenAIRequest{
-				Model:  model,
-				Stream: false,
-				Messages: []dto.Message{
-					{
-						Role:    "user",
-						Content: "hi",
-					},
-				},
-				MaxTokens: maxTokens,
-			}
-		}
-	}
-
-	// VolcEngine 图像生成模型（seedream）
-	// 保持与 testChannel 中的 requestPath/relayFormat 自动检测逻辑一致
-	if channel != nil && channel.Type == constant.ChannelTypeVolcEngine && strings.Contains(model, "seedream") {
-		return &dto.ImageRequest{
-			Model:  model,
-			Prompt: "a cute cat",
-			N:      1,
-			Size:   "1024x1024",
-		}
-	}
-
-	// 自动检测逻辑（保持原有行为）
-	// 先判断是否为 Embedding 模型
-	if strings.Contains(strings.ToLower(model), "embedding") ||
-		strings.HasPrefix(model, "m3e") ||
-		strings.Contains(model, "bge-") {
-		// 返回 EmbeddingRequest
-		return &dto.EmbeddingRequest{
-			Model: model,
-			Input: []any{"hello world"},
-		}
-	}
-
-	// Responses-only models (e.g. codex series)
-	if strings.Contains(strings.ToLower(model), "codex") {
-		return &dto.OpenAIResponsesRequest{
-			Model: model,
-			Input: json.RawMessage("\"hi\""),
-		}
-	}
-
-	// Chat/Completion 请求 - 返回 GeneralOpenAIRequest
-	testRequest := &dto.GeneralOpenAIRequest{
-		Model:  model,
-		Stream: false,
-		Messages: []dto.Message{
-			{
-				Role:    "user",
-				Content: "hi",
-			},
+			req.Model = testModel
+			return &req, nil
 		},
 	}
 
-	if strings.HasPrefix(model, "o") {
-		testRequest.MaxCompletionTokens = 16
-	} else if strings.Contains(model, "thinking") {
-		if !strings.Contains(model, "claude") {
-			testRequest.MaxTokens = 50
+	var lastErr error
+	for _, parse := range parsers {
+		req, err := parse()
+		if err == nil {
+			return req, nil
 		}
-	} else if strings.Contains(model, "gemini") {
-		testRequest.MaxTokens = 3000
+		lastErr = err
+	}
+	return nil, lastErr
+}
+
+func buildTestRequest(modelName string, endpointType string, channel *model.Channel) dto.Request {
+	// Keep signature unchanged for callers, but generate request strictly based on
+	// the resolved request path (and thus relay mode/format), to stay consistent
+	// with the downstream validation/convert logic.
+	requestPath := "/v1/chat/completions"
+
+	if endpointType != "" {
+		if endpointInfo, ok := common.GetDefaultEndpointInfo(constant.EndpointType(endpointType)); ok {
+			requestPath = endpointInfo.Path
+		}
 	} else {
-		testRequest.MaxTokens = 16
+		lower := strings.ToLower(modelName)
+		if strings.Contains(lower, "embedding") ||
+			strings.HasPrefix(modelName, "m3e") ||
+			strings.Contains(modelName, "bge-") ||
+			strings.Contains(modelName, "embed") ||
+			(channel != nil && channel.Type == constant.ChannelTypeMokaAI) {
+			requestPath = "/v1/embeddings"
+		}
+		if channel != nil && channel.Type == constant.ChannelTypeVolcEngine && strings.Contains(modelName, "seedream") {
+			requestPath = "/v1/images/generations"
+		}
+		if strings.Contains(lower, "codex") {
+			requestPath = "/v1/responses"
+		}
 	}
 
-	return testRequest
+	relayMode := relayconstant.Path2RelayMode(requestPath)
+
+	switch relayMode {
+	case relayconstant.RelayModeEmbeddings:
+		return &dto.EmbeddingRequest{Model: modelName, Input: []any{"hello world"}}
+	case relayconstant.RelayModeImagesGenerations:
+		return &dto.ImageRequest{Model: modelName, Prompt: "a cute cat", N: 1, Size: "1024x1024"}
+	case relayconstant.RelayModeRerank:
+		return &dto.RerankRequest{
+			Model:     modelName,
+			Query:     "What is Deep Learning?",
+			Documents: []any{"Deep Learning is a subset of machine learning.", "Machine learning is a field of artificial intelligence."},
+			TopN:      2,
+		}
+	case relayconstant.RelayModeResponses:
+		return &dto.OpenAIResponsesRequest{Model: modelName, Input: json.RawMessage("\"hi\"")}
+	default:
+		// Chat/Completion 请求 - 返回 GeneralOpenAIRequest
+		testRequest := &dto.GeneralOpenAIRequest{
+			Model:  modelName,
+			Stream: false,
+			Messages: []dto.Message{{
+				Role:    "user",
+				Content: "hi",
+			}},
+		}
+
+		if strings.HasPrefix(modelName, "o") {
+			testRequest.MaxCompletionTokens = 16
+		} else if strings.Contains(modelName, "thinking") {
+			if !strings.Contains(modelName, "claude") {
+				testRequest.MaxTokens = 50
+			}
+		} else if strings.Contains(modelName, "gemini") {
+			testRequest.MaxTokens = 3000
+		} else {
+			testRequest.MaxTokens = 16
+		}
+
+		return testRequest
+	}
 }
 
 func TestChannel(c *gin.Context) {
