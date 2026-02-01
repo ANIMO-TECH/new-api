@@ -57,19 +57,7 @@ func recordFailedChannelTestLog(c *gin.Context, channel *model.Channel, originMo
 	if reason != "" {
 		other["error"] = reason
 	}
-	model.RecordConsumeLog(c, 1, model.RecordConsumeLogParams{
-		ChannelId:        channel.Id,
-		PromptTokens:     0,
-		CompletionTokens: 0,
-		ModelName:        originModelName,
-		TokenName:        "模型测试",
-		Quota:            0,
-		Content:          "模型测试（失败）",
-		UseTimeSeconds:   useTimeSeconds,
-		IsStream:         false,
-		Group:            c.GetString("group"),
-		Other:            other,
-	})
+	model.RecordErrorLog(c, 1, channel.Id, originModelName, "模型测试", "模型测试（失败）", 0, useTimeSeconds, false, c.GetString("group"), other)
 }
 
 func testChannel(channel *model.Channel, testModel string, endpointType string) testResult {
