@@ -2,6 +2,7 @@ package controller
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -144,6 +145,14 @@ func testChannel(channel *model.Channel, testModel string, endpointType string) 
 		URL:    &url.URL{Path: requestPath}, // 使用动态路径
 		Body:   nil,
 		Header: make(http.Header),
+	}
+
+	// Apply an explicit timeout for channel tests so they don't hang indefinitely.
+	// Prefer the configured disable threshold (seconds) as the test HTTP timeout.
+	if common.ChannelDisableThreshold > 0 {
+		testCtx, cancel := context.WithTimeout(context.Background(), time.Duration(common.ChannelDisableThreshold)*time.Second)
+		defer cancel()
+		c.Request = c.Request.WithContext(testCtx)
 	}
 
 	cache, err := model.GetUserCache(1)
