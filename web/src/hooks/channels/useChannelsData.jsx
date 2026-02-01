@@ -876,6 +876,11 @@ export const useChannelsData = () => {
     setTestingModels((prev) => new Set([...prev, model]));
 
     try {
+      if (!model || String(model).trim() === '') {
+        showError(t('该通道未配置测试模型，请先在通道设置中填写“默认测试模型”。'));
+        return;
+      }
+
       let url = `/api/channel/test/${record.id}?model=${model}`;
       if (endpointType) {
         url += `&endpoint_type=${endpointType}`;
@@ -907,22 +912,12 @@ export const useChannelsData = () => {
           channel.test_time = Date.now() / 1000;
         });
 
-        if (!model || model === '') {
-          showInfo(
-            t('通道 ${name} 测试成功，耗时 ${time.toFixed(2)} 秒。')
-              .replace('${name}', record.name)
-              .replace('${time.toFixed(2)}', time.toFixed(2)),
-          );
-        } else {
-          showInfo(
-            t(
-              '通道 ${name} 测试成功，模型 ${model} 耗时 ${time.toFixed(2)} 秒。',
-            )
-              .replace('${name}', record.name)
-              .replace('${model}', model)
-              .replace('${time.toFixed(2)}', time.toFixed(2)),
-          );
-        }
+        showInfo(
+          t('通道 ${name} 测试成功，模型 ${model} 耗时 ${time.toFixed(2)} 秒。')
+            .replace('${name}', record.name)
+            .replace('${model}', model)
+            .replace('${time.toFixed(2)}', time.toFixed(2)),
+        );
       } else {
         showError(`${t('模型')} ${model}: ${message}`);
       }

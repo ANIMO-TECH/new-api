@@ -2802,7 +2802,7 @@ const EditChannelModal = (props) => {
                     <Form.Input
                       field='test_model'
                       label={t('默认测试模型')}
-                      placeholder={t('不填则为模型列表第一个')}
+                      placeholder={t('不填则跳过自动测试')}
                       onChange={(value) =>
                         handleInputChange('test_model', value)
                       }
