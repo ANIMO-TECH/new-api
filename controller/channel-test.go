@@ -181,7 +181,7 @@ func testChannel(channel *model.Channel, testModel string, endpointType string) 
 	if testRequestBody, err := model.GetModelTestRequestBodyByName(testModel); err != nil {
 		return testResult{context: c, localErr: err, newAPIError: types.NewError(err, types.ErrorCodeInvalidRequest)}
 	} else if testRequestBody != nil && strings.TrimSpace(*testRequestBody) != "" {
-		overridden, err := parseTestRequestOverride(*testRequestBody, testModel)
+		overridden, err := parseTestRequestOverride(*testRequestBody, testModel, relayFormat)
 		if err != nil {
 			return testResult{context: c, localErr: err, newAPIError: types.NewError(err, types.ErrorCodeInvalidRequest)}
 		}
@@ -431,68 +431,51 @@ func testChannel(channel *model.Channel, testModel string, endpointType string) 
 	}
 }
 
-func parseTestRequestOverride(body string, testModel string) (dto.Request, error) {
+func parseTestRequestOverride(body string, testModel string, relayFormat types.RelayFormat) (dto.Request, error) {
 	trimmed := strings.TrimSpace(body)
 	if trimmed == "" {
 		return nil, errors.New("empty test_request_body")
 	}
 
-	// Parse without relying on endpoint type. The actual relay mode (and request
-	// validation) is derived later from request path + relay info.
-	// We try known request shapes in order to keep it aligned with subsequent
-	// relay format / mode detection.
-	parsers := []func() (dto.Request, error){
-		func() (dto.Request, error) {
-			var req dto.GeneralOpenAIRequest
-			if err := json.Unmarshal([]byte(trimmed), &req); err != nil {
-				return nil, err
-			}
-			req.Model = testModel
-			return &req, nil
-		},
-		func() (dto.Request, error) {
-			var req dto.OpenAIResponsesRequest
-			if err := json.Unmarshal([]byte(trimmed), &req); err != nil {
-				return nil, err
-			}
-			req.Model = testModel
-			return &req, nil
-		},
-		func() (dto.Request, error) {
-			var req dto.EmbeddingRequest
-			if err := json.Unmarshal([]byte(trimmed), &req); err != nil {
-				return nil, err
-			}
-			req.Model = testModel
-			return &req, nil
-		},
-		func() (dto.Request, error) {
-			var req dto.RerankRequest
-			if err := json.Unmarshal([]byte(trimmed), &req); err != nil {
-				return nil, err
-			}
-			req.Model = testModel
-			return &req, nil
-		},
-		func() (dto.Request, error) {
-			var req dto.ImageRequest
-			if err := json.Unmarshal([]byte(trimmed), &req); err != nil {
-				return nil, err
-			}
-			req.Model = testModel
-			return &req, nil
-		},
-	}
-
-	var lastErr error
-	for _, parse := range parsers {
-		req, err := parse()
-		if err == nil {
-			return req, nil
+	switch relayFormat {
+	case types.RelayFormatOpenAI, types.RelayFormatClaude, types.RelayFormatGemini:
+		var req dto.GeneralOpenAIRequest
+		if err := json.Unmarshal([]byte(trimmed), &req); err != nil {
+			return nil, err
 		}
-		lastErr = err
+		req.Model = testModel
+		return &req, nil
+	case types.RelayFormatEmbedding:
+		var req dto.EmbeddingRequest
+		if err := json.Unmarshal([]byte(trimmed), &req); err != nil {
+			return nil, err
+		}
+		req.Model = testModel
+		return &req, nil
+	case types.RelayFormatOpenAIImage:
+		var req dto.ImageRequest
+		if err := json.Unmarshal([]byte(trimmed), &req); err != nil {
+			return nil, err
+		}
+		req.Model = testModel
+		return &req, nil
+	case types.RelayFormatRerank:
+		var req dto.RerankRequest
+		if err := json.Unmarshal([]byte(trimmed), &req); err != nil {
+			return nil, err
+		}
+		req.Model = testModel
+		return &req, nil
+	case types.RelayFormatOpenAIResponses:
+		var req dto.OpenAIResponsesRequest
+		if err := json.Unmarshal([]byte(trimmed), &req); err != nil {
+			return nil, err
+		}
+		req.Model = testModel
+		return &req, nil
+	default:
+		return nil, fmt.Errorf("unsupported relay format for channel test override: %v", relayFormat)
 	}
-	return nil, lastErr
 }
 
 func buildTestRequest(modelName string, endpointType string, channel *model.Channel) dto.Request {
