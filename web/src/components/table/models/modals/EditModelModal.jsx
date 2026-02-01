@@ -551,6 +551,22 @@ const EditModelModal = (props) => {
                         rows={10}
                         showClear
                         disabled={!values.use_test_request_body}
+                        rules={[
+                          {
+                            validator: (_, value) => {
+                              if (!values.use_test_request_body) return true;
+                              const text = String(value || '').trim();
+                              if (text === '') return true;
+                              try {
+                                JSON.parse(text);
+                                return true;
+                              } catch {
+                                return false;
+                              }
+                            },
+                            message: t('JSON 格式错误'),
+                          },
+                        ]}
                       />
                     </Card>
                   </Col>
