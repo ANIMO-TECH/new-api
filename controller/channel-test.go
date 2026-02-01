@@ -348,10 +348,17 @@ func testChannel(channel *model.Channel, testModel string, endpointType string) 
 			}
 		}
 	default:
-		// Chat/Completion 等其他请求类型
-		if generalReq, ok := request.(*dto.GeneralOpenAIRequest); ok {
-			convertedRequest, err = adaptor.ConvertOpenAIRequest(c, info, generalReq)
-		} else {
+		// Chat/Completion (OpenAI) and other request types.
+		// NOTE: There is no dedicated Claude relay mode in this project, so Claude
+		// requests also go through this default branch.
+		switch req := request.(type) {
+		case *dto.GeneralOpenAIRequest:
+			convertedRequest, err = adaptor.ConvertOpenAIRequest(c, info, req)
+		case *dto.ClaudeRequest:
+			convertedRequest, err = adaptor.ConvertClaudeRequest(c, info, req)
+		case *dto.GeminiChatRequest:
+			convertedRequest, err = adaptor.ConvertGeminiRequest(c, info, req)
+		default:
 			return testResult{
 				context:     c,
 				localErr:    errors.New("invalid general request type"),
