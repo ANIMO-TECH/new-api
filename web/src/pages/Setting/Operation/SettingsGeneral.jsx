@@ -51,6 +51,7 @@ export default function GeneralSettings(props) {
     'general_setting.custom_currency_exchange_rate': '',
     QuotaPerUnit: '',
     RetryTimes: '',
+    RelayTimeout: '',
     USDExchangeRate: '',
     DisplayTokenStatEnabled: false,
     DefaultCollapseSidebar: false,
@@ -197,6 +198,16 @@ export default function GeneralSettings(props) {
                   initValue={''}
                   placeholder={t('失败重试次数')}
                   onChange={handleFieldChange('RetryTimes')}
+                  showClear
+                />
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.Input
+                  field={'RelayTimeout'}
+                  label={t('转发超时（秒）')}
+                  initValue={''}
+                  placeholder={t('0 或不填表示不设置超时')}
+                  onChange={handleFieldChange('RelayTimeout')}
                   showClear
                 />
               </Col>

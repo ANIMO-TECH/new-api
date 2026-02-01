@@ -44,7 +44,8 @@ func InitHttpClient() {
 		transport.TLSClientConfig = common.InsecureTLSConfig
 	}
 
-	if common.RelayTimeout == 0 {
+	timeoutSeconds := common.RelayTimeout
+	if timeoutSeconds == 0 {
 		httpClient = &http.Client{
 			Transport:     transport,
 			CheckRedirect: checkRedirect,
@@ -52,7 +53,7 @@ func InitHttpClient() {
 	} else {
 		httpClient = &http.Client{
 			Transport:     transport,
-			Timeout:       time.Duration(common.RelayTimeout) * time.Second,
+			Timeout:       time.Duration(timeoutSeconds) * time.Second,
 			CheckRedirect: checkRedirect,
 		}
 	}

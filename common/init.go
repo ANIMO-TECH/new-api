@@ -100,7 +100,7 @@ func InitEnv() {
 	// Initialize variables with GetEnvOrDefault
 	SyncFrequency = GetEnvOrDefault("SYNC_FREQUENCY", 60)
 	BatchUpdateInterval = GetEnvOrDefault("BATCH_UPDATE_INTERVAL", 5)
-	RelayTimeout = GetEnvOrDefault("RELAY_TIMEOUT", 0)
+	RelayTimeout = 0
 	RelayMaxIdleConns = GetEnvOrDefault("RELAY_MAX_IDLE_CONNS", 500)
 	RelayMaxIdleConnsPerHost = GetEnvOrDefault("RELAY_MAX_IDLE_CONNS_PER_HOST", 100)
 
