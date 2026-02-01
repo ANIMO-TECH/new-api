@@ -33,7 +33,7 @@ import {
   Row,
   Tooltip,
 } from '@douyinfe/semi-ui';
-import { Save, X } from 'lucide-react';
+import { Save, X, FileText } from 'lucide-react';
 import { IconInfoCircle, IconLink } from '@douyinfe/semi-icons';
 import { API, showError, showSuccess } from '../../../../helpers';
 import { useTranslation } from 'react-i18next';
