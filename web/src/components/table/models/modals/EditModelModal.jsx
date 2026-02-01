@@ -33,7 +33,7 @@ import {
   Row,
   Tooltip,
 } from '@douyinfe/semi-ui';
-import { Save, X, FileText } from 'lucide-react';
+import { Save, X } from 'lucide-react';
 import { IconInfoCircle, IconLink } from '@douyinfe/semi-icons';
 import { API, showError, showSuccess } from '../../../../helpers';
 import { useTranslation } from 'react-i18next';
@@ -237,30 +237,6 @@ const EditModelModal = (props) => {
     formApiRef.current?.setValues(getInitValues());
   };
 
-  const fillDefaultTestRequestBody = async () => {
-    const values = formApiRef.current?.getValues?.() || {};
-    const modelName = values.model_name?.trim();
-    if (!modelName) {
-      showError(t('请先填写模型名称'));
-      return;
-    }
-    try {
-      const res = await API.get(
-        `/api/models/test_request_template?model_name=${encodeURIComponent(modelName)}`,
-      );
-      const { success, message, data } = res.data;
-      if (!success) {
-        showError(message || t('获取默认测试请求失败'));
-        return;
-      }
-      formApiRef.current?.setValue(
-        'test_request_body',
-        data?.test_request_body || '',
-      );
-    } catch (e) {
-      showError(t('获取默认测试请求失败'));
-    }
-  };
 
   return (
     <SideSheet
@@ -568,46 +544,14 @@ const EditModelModal = (props) => {
                         )}
                         size='large'
                       />
-                      <Space className='mb-2'>
-                        <Button
-                          icon={<FileText size={16} />}
-                          onClick={fillDefaultTestRequestBody}
-                          disabled={!values.use_test_request_body}
-                        >
-                          {t('填充默认')}
-                        </Button>
-                        <Button
-                          type='tertiary'
-                          onClick={() =>
-                            formApiRef.current?.setValue('test_request_body', '')
-                          }
-                          disabled={!values.use_test_request_body}
-                        >
-                          {t('清空')}
-                        </Button>
-                      </Space>
-                      <div
-                        style={{
-                          opacity: values.use_test_request_body ? 1 : 0.5,
-                          pointerEvents: values.use_test_request_body
-                            ? 'auto'
-                            : 'none',
-                        }}
-                      >
-                        <JSONEditor
-                          field='test_request_body'
-                          value={values.test_request_body}
-                          onChange={(val) =>
-                            formApiRef.current?.setValue(
-                              'test_request_body',
-                              val,
-                            )
-                          }
-                          formApi={formApiRef.current}
-                          editorType='object'
-                          extraText={t('仅用于渠道/通道测试请求体')}
-                        />
-                      </div>
+                      <Form.TextArea
+                        field='test_request_body'
+                        label={t('测试请求体（JSON）')}
+                        placeholder={t('请输入 JSON')}
+                        rows={10}
+                        showClear
+                        disabled={!values.use_test_request_body}
+                      />
                     </Card>
                   </Col>
                   <Col span={24}>
