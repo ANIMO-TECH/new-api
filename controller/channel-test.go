@@ -515,12 +515,25 @@ func parseTestRequestOverride(body string, testModel string, relayFormat types.R
 	}
 
 	switch relayFormat {
-	case types.RelayFormatOpenAI, types.RelayFormatClaude, types.RelayFormatGemini:
+	case types.RelayFormatOpenAI:
 		var req dto.GeneralOpenAIRequest
 		if err := json.Unmarshal([]byte(trimmed), &req); err != nil {
 			return nil, err
 		}
 		req.Model = testModel
+		return &req, nil
+	case types.RelayFormatClaude:
+		var req dto.ClaudeRequest
+		if err := json.Unmarshal([]byte(trimmed), &req); err != nil {
+			return nil, err
+		}
+		req.Model = testModel
+		return &req, nil
+	case types.RelayFormatGemini:
+		var req dto.GeminiChatRequest
+		if err := json.Unmarshal([]byte(trimmed), &req); err != nil {
+			return nil, err
+		}
 		return &req, nil
 	case types.RelayFormatEmbedding:
 		var req dto.EmbeddingRequest
