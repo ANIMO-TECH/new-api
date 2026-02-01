@@ -24,6 +24,7 @@ type Channel struct {
 	Key                string  `json:"key" gorm:"not null"`
 	OpenAIOrganization *string `json:"openai_organization"`
 	TestModel          *string `json:"test_model"`
+	TestEndpointType   *string `json:"test_endpoint_type" gorm:"type:varchar(32)"`
 	Status             int     `json:"status" gorm:"default:1"`
 	Name               string  `json:"name" gorm:"index"`
 	Weight             *uint   `json:"weight" gorm:"default:0"`

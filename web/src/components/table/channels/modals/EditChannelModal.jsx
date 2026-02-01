@@ -144,6 +144,7 @@ const EditChannelModal = (props) => {
     models: [],
     auto_ban: 1,
     test_model: '',
+    test_endpoint_type: '',
     groups: ['default'],
     priority: 0,
     weight: 0,
@@ -2807,6 +2808,25 @@ const EditChannelModal = (props) => {
                         handleInputChange('test_model', value)
                       }
                       showClear
+                    />
+
+                    <Form.Select
+                      field='test_endpoint_type'
+                      label={t('测试端点类型')}
+                      placeholder={t('不填则默认 chat/completions')}
+                      optionList={[
+                        { label: 'openai (chat/completions)', value: 'openai' },
+                        { label: 'openai-response (/v1/responses)', value: 'openai-response' },
+                        { label: 'anthropic (/v1/messages)', value: 'anthropic' },
+                        { label: 'gemini (/v1beta/models)', value: 'gemini' },
+                        { label: 'embeddings (/v1/embeddings)', value: 'embeddings' },
+                        { label: 'image-generation (/v1/images/generations)', value: 'image-generation' },
+                        { label: 'jina-rerank (/v1/rerank)', value: 'jina-rerank' },
+                      ]}
+                      showClear
+                      onChange={(value) =>
+                        handleInputChange('test_endpoint_type', value)
+                      }
                     />
 
                     <JSONEditor

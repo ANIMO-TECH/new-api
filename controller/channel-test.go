@@ -114,6 +114,8 @@ func testChannel(channel *model.Channel, testModel string, endpointType string) 
 	if endpointType != "" {
 		if endpointInfo, ok := common.GetDefaultEndpointInfo(constant.EndpointType(endpointType)); ok {
 			requestPath = endpointInfo.Path
+		} else {
+			return testResult{localErr: fmt.Errorf("invalid endpoint_type: %s", endpointType)}
 		}
 	} else {
 		// 如果没有指定端点类型，使用原有的自动检测逻辑
@@ -193,7 +195,7 @@ func testChannel(channel *model.Channel, testModel string, endpointType string) 
 		case constant.EndpointTypeEmbeddings:
 			relayFormat = types.RelayFormatEmbedding
 		default:
-			relayFormat = types.RelayFormatOpenAI
+			return testResult{context: c, localErr: fmt.Errorf("invalid endpoint_type: %s", endpointType), newAPIError: types.NewError(fmt.Errorf("invalid endpoint_type: %s", endpointType), types.ErrorCodeInvalidRequest)}
 		}
 	} else {
 		// 根据请求路径自动检测
@@ -639,6 +641,9 @@ func TestChannel(c *gin.Context) {
 	//}()
 	testModel := c.Query("model")
 	endpointType := c.Query("endpoint_type")
+	if endpointType == "" && channel.TestEndpointType != nil {
+		endpointType = strings.TrimSpace(*channel.TestEndpointType)
+	}
 	tik := time.Now()
 	result := testChannel(channel, testModel, endpointType)
 	if result.localErr != nil {
@@ -708,7 +713,11 @@ func testAllChannels(notify bool) error {
 		for _, channel := range channels {
 			isChannelEnabled := channel.Status == common.ChannelStatusEnabled
 			tik := time.Now()
-			result := testChannel(channel, "", "")
+			endpointType := ""
+			if channel.TestEndpointType != nil {
+				endpointType = strings.TrimSpace(*channel.TestEndpointType)
+			}
+			result := testChannel(channel, "", endpointType)
 			if errors.Is(result.localErr, errSkipChannelTest) {
 				continue
 			}
