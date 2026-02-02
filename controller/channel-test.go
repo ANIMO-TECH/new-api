@@ -64,7 +64,7 @@ func recordFailedChannelTestLog(c *gin.Context, channel *model.Channel, originMo
 	} else if reason != "" {
 		other["error"] = reason
 	}
-	model.RecordErrorLog(c, 1, channel.Id, originModelName, "模型测试", content, 0, useTimeSeconds, false, c.GetString("group"), other)
+	model.RecordErrorLog(c, 1, channel.Id, originModelName, c.GetString("token_name"), content, 0, useTimeSeconds, false, c.GetString("group"), other)
 }
 
 func testChannel(channel *model.Channel, testModel string, endpointType string) testResult {
@@ -142,6 +142,9 @@ func testChannel(channel *model.Channel, testModel string, endpointType string) 
 		Body:   nil,
 		Header: make(http.Header),
 	}
+	// Channel tests are triggered by background tasks / admins and don't go
+	// through token auth middleware. Set a stable token name for logs/UI.
+	c.Set("token_name", "模型测试")
 
 	// Apply an explicit timeout for channel tests so they don't hang indefinitely.
 	// Prefer the configured disable threshold (seconds) as the test HTTP timeout.
@@ -511,7 +514,7 @@ func testChannel(channel *model.Channel, testModel string, endpointType string) 
 		PromptTokens:     usage.PromptTokens,
 		CompletionTokens: usage.CompletionTokens,
 		ModelName:        info.OriginModelName,
-		TokenName:        "模型测试",
+		TokenName:        c.GetString("token_name"),
 		Quota:            quota,
 		Content:          "模型测试",
 		UseTimeSeconds:   int(consumedTime),
