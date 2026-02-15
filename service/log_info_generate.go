@@ -50,27 +50,49 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 		other["upstream_model_name"] = relayInfo.UpstreamModelName
 	}
 
-	isSystemPromptOverwritten := common.GetContextKeyBool(ctx, constant.ContextKeySystemPromptOverride)
-	if isSystemPromptOverwritten {
-		other["is_system_prompt_overwritten"] = true
+	if relayInfo != nil {
+		if relayInfo.TraceId != "" {
+			other["trace_id"] = relayInfo.TraceId
+		}
+		if relayInfo.RequestId != "" {
+			other["request_id"] = relayInfo.RequestId
+		}
+		if relayInfo.ChannelMeta != nil {
+			other["selected_channel_id"] = relayInfo.ChannelMeta.ChannelId
+		}
 	}
 
-	adminInfo := make(map[string]interface{})
-	adminInfo["use_channel"] = ctx.GetStringSlice("use_channel")
-	isMultiKey := common.GetContextKeyBool(ctx, constant.ContextKeyChannelIsMultiKey)
-	if isMultiKey {
-		adminInfo["is_multi_key"] = true
-		adminInfo["multi_key_index"] = common.GetContextKeyInt(ctx, constant.ContextKeyChannelMultiKeyIndex)
+	if ctx != nil {
+		if traceID := strings.TrimSpace(ctx.GetString(common.TraceIdKey)); traceID != "" {
+			other["trace_id"] = traceID
+		}
+		if requestID := strings.TrimSpace(ctx.GetString(common.RequestIdKey)); requestID != "" {
+			other["request_id"] = requestID
+		}
+		isSystemPromptOverwritten := common.GetContextKeyBool(ctx, constant.ContextKeySystemPromptOverride)
+		if isSystemPromptOverwritten {
+			other["is_system_prompt_overwritten"] = true
+		}
 	}
 
-	isLocalCountTokens := common.GetContextKeyBool(ctx, constant.ContextKeyLocalCountTokens)
-	if isLocalCountTokens {
-		adminInfo["local_count_tokens"] = isLocalCountTokens
+	if ctx != nil {
+		adminInfo := make(map[string]interface{})
+		adminInfo["use_channel"] = ctx.GetStringSlice("use_channel")
+		isMultiKey := common.GetContextKeyBool(ctx, constant.ContextKeyChannelIsMultiKey)
+		if isMultiKey {
+			adminInfo["is_multi_key"] = true
+			adminInfo["multi_key_index"] = common.GetContextKeyInt(ctx, constant.ContextKeyChannelMultiKeyIndex)
+		}
+
+		isLocalCountTokens := common.GetContextKeyBool(ctx, constant.ContextKeyLocalCountTokens)
+		if isLocalCountTokens {
+			adminInfo["local_count_tokens"] = isLocalCountTokens
+		}
+
+		AppendChannelAffinityAdminInfo(ctx, adminInfo)
+
+		other["admin_info"] = adminInfo
 	}
-
-	AppendChannelAffinityAdminInfo(ctx, adminInfo)
-
-	other["admin_info"] = adminInfo
 	appendRequestPath(ctx, relayInfo, other)
 	appendRequestConversionChain(relayInfo, other)
 	appendBillingInfo(relayInfo, other)

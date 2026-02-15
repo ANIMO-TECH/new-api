@@ -84,8 +84,12 @@ func logHelper(ctx context.Context, level string, msg string) {
 	if id == nil {
 		id = "SYSTEM"
 	}
+	traceID := ctx.Value(common.TraceIdKey)
+	if traceID == nil {
+		traceID = "-"
+	}
 	now := time.Now()
-	_, _ = fmt.Fprintf(writer, "[%s] %v | %s | %s \n", level, now.Format("2006/01/02 - 15:04:05"), id, msg)
+	_, _ = fmt.Fprintf(writer, "[%s] %v | %s | %s | %s \n", level, now.Format("2006/01/02 - 15:04:05"), id, traceID, msg)
 	logCount++ // we don't need accurate count, so no lock here
 	if logCount > maxLogCount && !setupLogWorking {
 		logCount = 0

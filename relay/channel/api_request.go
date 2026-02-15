@@ -40,6 +40,7 @@ func SetupApiRequestHeader(info *common.RelayInfo, c *gin.Context, req *http.Hea
 }
 
 const clientHeaderPlaceholderPrefix = "{client_header:"
+const traceParentForwardHeader = "traceparent"
 
 const (
 	headerPassthroughAllKey        = "*"
@@ -275,6 +276,31 @@ func applyHeaderOverrideToRequest(req *http.Request, headerOverride map[string]s
 	}
 }
 
+func applyTraceHeaders(c *gin.Context, headers http.Header) {
+	if c == nil || headers == nil {
+		return
+	}
+
+	requestID := strings.TrimSpace(c.GetString(common2.RequestIdKey))
+	if requestID != "" {
+		headers.Set(common2.RequestIdKey, requestID)
+	}
+
+	traceID := strings.TrimSpace(c.GetString(common2.TraceIdKey))
+	if traceID == "" && c.Request != nil {
+		traceID = strings.TrimSpace(c.Request.Header.Get(common2.TraceIdKey))
+	}
+	if traceID != "" {
+		headers.Set(common2.TraceIdKey, traceID)
+	}
+
+	if c.Request != nil {
+		if traceparent := strings.TrimSpace(c.Request.Header.Get(traceParentForwardHeader)); traceparent != "" {
+			headers.Set(traceParentForwardHeader, traceparent)
+		}
+	}
+}
+
 func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody io.Reader) (*http.Response, error) {
 	fullRequestURL, err := a.GetRequestURL(info)
 	if err != nil {
@@ -292,6 +318,7 @@ func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 	if err != nil {
 		return nil, fmt.Errorf("setup request header failed: %w", err)
 	}
+	applyTraceHeaders(c, req.Header)
 	// 在 SetupRequestHeader 之后应用 Header Override，确保用户设置优先级最高
 	// 这样可以覆盖默认的 Authorization header 设置
 	headerOverride, err := processHeaderOverride(info, c)
@@ -325,6 +352,7 @@ func DoFormRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBod
 	if err != nil {
 		return nil, fmt.Errorf("setup request header failed: %w", err)
 	}
+	applyTraceHeaders(c, req.Header)
 	// 在 SetupRequestHeader 之后应用 Header Override，确保用户设置优先级最高
 	// 这样可以覆盖默认的 Authorization header 设置
 	headerOverride, err := processHeaderOverride(info, c)
@@ -349,6 +377,7 @@ func DoWssRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 	if err != nil {
 		return nil, fmt.Errorf("setup request header failed: %w", err)
 	}
+	applyTraceHeaders(c, targetHeader)
 	// 在 SetupRequestHeader 之后应用 Header Override，确保用户设置优先级最高
 	// 这样可以覆盖默认的 Authorization header 设置
 	headerOverride, err := processHeaderOverride(info, c)

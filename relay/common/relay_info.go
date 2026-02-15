@@ -135,6 +135,7 @@ type RelayInfo struct {
 	SubscriptionPlanTitle string
 	// RequestId is used for idempotent pre-consume/refund
 	RequestId string
+	TraceId   string
 	// SubscriptionAmountTotal / SubscriptionAmountUsedAfterPreConsume are used to compute remaining in logs.
 	SubscriptionAmountTotal               int64
 	SubscriptionAmountUsedAfterPreConsume int64
@@ -232,6 +233,9 @@ func (info *RelayInfo) ToString() string {
 	fmt.Fprintf(b, "DisablePing: %t, ", info.DisablePing)
 	fmt.Fprintf(b, "SendResponseCount: %d, ", info.SendResponseCount)
 	fmt.Fprintf(b, "FinalPreConsumedQuota: %d, ", info.FinalPreConsumedQuota)
+	if info.TraceId != "" {
+		fmt.Fprintf(b, "TraceId: %q, ", info.TraceId)
+	}
 
 	// User & token info (mask secrets)
 	fmt.Fprintf(b, "User{ Id: %d, Email: %q, Group: %q, UsingGroup: %q, Quota: %d }, ",
@@ -436,10 +440,12 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 	if reqId == "" {
 		reqId = common.GetTimeString() + common.GetRandomString(8)
 	}
+	traceId := common.GetContextKeyString(c, common.TraceIdKey)
 	info := &RelayInfo{
 		Request: request,
 
 		RequestId:  reqId,
+		TraceId:    traceId,
 		UserId:     common.GetContextKeyInt(c, constant.ContextKeyUserId),
 		UsingGroup: common.GetContextKeyString(c, constant.ContextKeyUsingGroup),
 		UserGroup:  common.GetContextKeyString(c, constant.ContextKeyUserGroup),

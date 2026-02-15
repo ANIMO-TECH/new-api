@@ -135,6 +135,7 @@ var CohereSafetySetting string
 
 const (
 	RequestIdKey = "X-Oneapi-Request-Id"
+	TraceIdKey   = "X-Trace-Id"
 )
 
 const (
