@@ -6,6 +6,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/gin-gonic/gin"
+	"go.opentelemetry.io/otel/trace"
 )
 
 const traceParentHeader = "traceparent"
@@ -15,6 +16,11 @@ func TraceId() gin.HandlerFunc {
 		traceID := normalizeTraceID(c.GetHeader(common.TraceIdKey))
 		if traceID == "" {
 			traceID = parseTraceIDFromTraceParent(c.GetHeader(traceParentHeader))
+		}
+		if traceID == "" {
+			if spanCtx := trace.SpanContextFromContext(c.Request.Context()); spanCtx.IsValid() {
+				traceID = normalizeTraceID(spanCtx.TraceID().String())
+			}
 		}
 		if traceID != "" {
 			c.Set(common.TraceIdKey, traceID)
