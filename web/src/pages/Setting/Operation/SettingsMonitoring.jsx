@@ -49,6 +49,7 @@ export default function SettingsMonitoring(props) {
     AutomaticRetryStatusCodes: '100-199,300-399,401-407,409-499,500-503,505-523,525-599',
     'monitor_setting.auto_test_channel_enabled': false,
     'monitor_setting.auto_test_channel_minutes': 10,
+    'monitor_setting.auto_test_channel_retry_times': 0,
   });
   const refForm = useRef();
   const [inputsRow, setInputsRow] = useState(inputs);
@@ -164,6 +165,23 @@ export default function SettingsMonitoring(props) {
                     setInputs({
                       ...inputs,
                       'monitor_setting.auto_test_channel_minutes':
+                        parseInt(value),
+                    })
+                  }
+                />
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.InputNumber
+                  label={t('自动测试失败重试次数')}
+                  step={1}
+                  min={0}
+                  extraText={t('单个通道测试失败后额外重试次数，0 表示不重试')}
+                  placeholder={''}
+                  field={'monitor_setting.auto_test_channel_retry_times'}
+                  onChange={(value) =>
+                    setInputs({
+                      ...inputs,
+                      'monitor_setting.auto_test_channel_retry_times':
                         parseInt(value),
                     })
                   }

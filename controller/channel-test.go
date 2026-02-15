@@ -758,7 +758,27 @@ func testAllChannels(notify bool) error {
 			if channel.TestEndpointType != nil {
 				endpointType = strings.TrimSpace(*channel.TestEndpointType)
 			}
-			result := testChannel(channel, "", endpointType)
+			retryTimes := operation_setting.GetMonitorSetting().AutoTestChannelRetryTimes
+			if retryTimes < 0 {
+				retryTimes = 0
+			}
+			maxAttempts := retryTimes + 1
+			if maxAttempts < 1 {
+				maxAttempts = 1
+			}
+
+			var result testResult
+			for attempt := 1; attempt <= maxAttempts; attempt++ {
+				result = testChannel(channel, "", endpointType)
+				if errors.Is(result.localErr, errSkipChannelTest) {
+					break
+				}
+				// Success: stop retrying.
+				if result.newAPIError == nil {
+					break
+				}
+				// Failure: retry immediately if attempts remain.
+			}
 			if errors.Is(result.localErr, errSkipChannelTest) {
 				continue
 			}
