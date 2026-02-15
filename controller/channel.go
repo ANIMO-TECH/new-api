@@ -628,6 +628,13 @@ func validateChannel(channel *model.Channel, isAdd bool) error {
 		}
 	}
 
+	if channel.TestEndpointType != nil && strings.TrimSpace(*channel.TestEndpointType) != "" {
+		endpointType := constant.EndpointType(strings.TrimSpace(*channel.TestEndpointType))
+		if _, ok := common.GetDefaultEndpointInfo(endpointType); !ok {
+			return fmt.Errorf("测试端点类型无效: %s", *channel.TestEndpointType)
+		}
+	}
+
 	return nil
 }
 

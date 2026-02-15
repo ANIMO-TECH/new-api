@@ -124,6 +124,7 @@ const EditModelModal = (props) => {
     name_rule: props.editingModel?.model_name ? 0 : undefined, // 通过未配置模型过来的固定为精确匹配
     status: true,
     sync_official: true,
+
   });
 
   const handleCancel = () => {
@@ -228,6 +229,7 @@ const EditModelModal = (props) => {
     setLoading(false);
     formApiRef.current?.setValues(getInitValues());
   };
+
 
   return (
     <SideSheet
