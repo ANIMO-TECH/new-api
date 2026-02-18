@@ -1,37 +1,41 @@
 package middleware
 
 import (
-	"fmt"
+	"time"
 
-	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/logutils"
 	"github.com/gin-gonic/gin"
 )
 
 func SetUpLogger(server *gin.Engine) {
-	server.Use(gin.LoggerWithFormatter(func(param gin.LogFormatterParams) string {
-		var requestID string
-		var traceID string
-		if param.Keys != nil {
-			if v, ok := param.Keys[common.RequestIdKey]; ok {
-				if s, ok := v.(string); ok {
-					requestID = s
-				}
-			}
-			if v, ok := param.Keys[common.TraceIdKey]; ok {
-				if s, ok := v.(string); ok {
-					traceID = s
-				}
-			}
+	server.Use(func(c *gin.Context) {
+		start := time.Now()
+		path := c.Request.URL.Path
+		query := c.Request.URL.RawQuery
+
+		c.Next()
+
+		latency := time.Since(start)
+		statusCode := c.Writer.Status()
+		event := logutils.Info(c.Request.Context())
+		if statusCode >= 500 || len(c.Errors) > 0 {
+			event = logutils.Error(c.Request.Context())
+		} else if statusCode >= 400 {
+			event = logutils.Warn(c.Request.Context())
 		}
-		return fmt.Sprintf("[GIN] %s | %s | %s | %3d | %13v | %15s | %7s %s\n",
-			param.TimeStamp.Format("2006/01/02 - 15:04:05"),
-			requestID,
-			traceID,
-			param.StatusCode,
-			param.Latency,
-			param.ClientIP,
-			param.Method,
-			param.Path,
-		)
-	}))
+
+		event.
+			Str("log_source", "http").
+			Int("status_code", statusCode).
+			Str("method", c.Request.Method).
+			Str("path", path).
+			Str("query", query).
+			Str("client_ip", c.ClientIP()).
+			Dur("latency", latency).
+			Int("body_size", c.Writer.Size())
+		if len(c.Errors) > 0 {
+			event.Str("errors", c.Errors.String())
+		}
+		event.Msg("http request")
+	})
 }

@@ -1,26 +1,31 @@
 package common
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"time"
 
+	"github.com/QuantumNous/new-api/logutils"
 	"github.com/gin-gonic/gin"
 )
 
 func SysLog(s string) {
-	t := time.Now()
-	_, _ = fmt.Fprintf(gin.DefaultWriter, "[SYS] %v | %s \n", t.Format("2006/01/02 - 15:04:05"), s)
+	logutils.Info(context.Background()).
+		Str("log_source", "sys").
+		Msg(s)
 }
 
 func SysError(s string) {
-	t := time.Now()
-	_, _ = fmt.Fprintf(gin.DefaultErrorWriter, "[SYS] %v | %s \n", t.Format("2006/01/02 - 15:04:05"), s)
+	logutils.Error(context.Background()).
+		Str("log_source", "sys").
+		Msg(s)
 }
 
 func FatalLog(v ...any) {
-	t := time.Now()
-	_, _ = fmt.Fprintf(gin.DefaultErrorWriter, "[FATAL] %v | %v \n", t.Format("2006/01/02 - 15:04:05"), v)
+	logutils.Error(context.Background()).
+		Str("log_source", "sys").
+		Msg(fmt.Sprint(v...))
 	os.Exit(1)
 }
 

@@ -8,62 +8,57 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"sync"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/logutils"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
-
-	"github.com/bytedance/gopkg/util/gopool"
 	"github.com/gin-gonic/gin"
 )
 
-const (
-	loggerINFO  = "INFO"
-	loggerWarn  = "WARN"
-	loggerError = "ERR"
-	loggerDebug = "DEBUG"
-)
-
-const maxLogCount = 1000000
-
-var logCount int
-var setupLogLock sync.Mutex
-var setupLogWorking bool
-
 func SetupLogger() {
-	defer func() {
-		setupLogWorking = false
-	}()
+	var output io.Writer = os.Stdout
 	if *common.LogDir != "" {
-		ok := setupLogLock.TryLock()
-		if !ok {
-			log.Println("setup log is already working")
-			return
-		}
-		defer func() {
-			setupLogLock.Unlock()
-		}()
 		logPath := filepath.Join(*common.LogDir, fmt.Sprintf("oneapi-%s.log", time.Now().Format("20060102150405")))
 		fd, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
 			log.Fatal("failed to open log file")
 		}
-		gin.DefaultWriter = io.MultiWriter(os.Stdout, fd)
-		gin.DefaultErrorWriter = io.MultiWriter(os.Stderr, fd)
+		output = io.MultiWriter(os.Stdout, fd)
+		gin.DefaultWriter = output
+		gin.DefaultErrorWriter = output
+	} else {
+		gin.DefaultWriter = os.Stdout
+		gin.DefaultErrorWriter = os.Stderr
 	}
+
+	level := "info"
+	if common.DebugEnabled {
+		level = "debug"
+	}
+	envName := os.Getenv("APP_ENV")
+	if envName == "" {
+		envName = os.Getenv("NODE_TYPE")
+	}
+	logutils.Init(logutils.InitOptions{
+		Writer:         output,
+		Level:          level,
+		Env:            envName,
+		ServiceName:    "new-api",
+		ServiceVersion: common.Version,
+	})
 }
 
 func LogInfo(ctx context.Context, msg string) {
-	logHelper(ctx, loggerINFO, msg)
+	logutils.Info(ctx).Msg(msg)
 }
 
 func LogWarn(ctx context.Context, msg string) {
-	logHelper(ctx, loggerWarn, msg)
+	logutils.Warn(ctx).Msg(msg)
 }
 
 func LogError(ctx context.Context, msg string) {
-	logHelper(ctx, loggerError, msg)
+	logutils.Error(ctx).Msg(msg)
 }
 
 func LogDebug(ctx context.Context, msg string, args ...any) {
@@ -71,32 +66,7 @@ func LogDebug(ctx context.Context, msg string, args ...any) {
 		if len(args) > 0 {
 			msg = fmt.Sprintf(msg, args...)
 		}
-		logHelper(ctx, loggerDebug, msg)
-	}
-}
-
-func logHelper(ctx context.Context, level string, msg string) {
-	writer := gin.DefaultErrorWriter
-	if level == loggerINFO {
-		writer = gin.DefaultWriter
-	}
-	id := ctx.Value(common.RequestIdKey)
-	if id == nil {
-		id = "SYSTEM"
-	}
-	traceID := ctx.Value(common.TraceIdKey)
-	if traceID == nil {
-		traceID = "-"
-	}
-	now := time.Now()
-	_, _ = fmt.Fprintf(writer, "[%s] %v | %s | %s | %s \n", level, now.Format("2006/01/02 - 15:04:05"), id, traceID, msg)
-	logCount++ // we don't need accurate count, so no lock here
-	if logCount > maxLogCount && !setupLogWorking {
-		logCount = 0
-		setupLogWorking = true
-		gopool.Go(func() {
-			SetupLogger()
-		})
+		logutils.Debug(ctx).Msg(msg)
 	}
 }
 
