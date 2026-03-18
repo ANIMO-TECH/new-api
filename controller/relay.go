@@ -13,6 +13,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/logutils"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay"
@@ -120,6 +121,55 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		newAPIError = types.NewError(err, types.ErrorCodeGenRelayInfoFailed)
 		return
 	}
+
+	// Emit a single gateway outcome log at the end of the request, regardless of
+	// success or failure. Placed here so it has access to relayInfo and runs after
+	// all retry/fallback logic is complete. Defers execute LIFO so this runs after
+	// the error-response and quota-refund defers above.
+	defer func() {
+		useChannels := c.GetStringSlice("use_channel")
+		retryCount := len(useChannels) - 1
+		if retryCount < 0 {
+			retryCount = 0
+		}
+
+		statusCode := http.StatusOK
+		if newAPIError != nil {
+			statusCode = newAPIError.StatusCode
+		}
+
+		var frtMs float64
+		if relayInfo.FirstResponseTime.After(relayInfo.StartTime) {
+			frtMs = float64(relayInfo.FirstResponseTime.UnixMilli() - relayInfo.StartTime.UnixMilli())
+		}
+
+		channelID := 0
+		channelName := ""
+		upstreamModelName := ""
+		if relayInfo.ChannelMeta != nil {
+			channelID = relayInfo.ChannelMeta.ChannelId
+			channelName = c.GetString("channel_name")
+			upstreamModelName = relayInfo.ChannelMeta.UpstreamModelName
+		}
+
+		logutils.EmitGatewayOutcome(c, &logutils.GatewayOutcome{
+			Module:            "relay",
+			APIName:           logutils.RelayModeToAPIName(relayInfo.RelayMode),
+			ModelName:         relayInfo.OriginModelName,
+			UpstreamModelName: upstreamModelName,
+			ChannelID:         channelID,
+			ChannelName:       channelName,
+			UseChannel:        logutils.FormatUseChannel(useChannels),
+			RetryCount:        retryCount,
+			FallbackTriggered: len(useChannels) > 1,
+			Success:           newAPIError == nil,
+			StatusCode:        statusCode,
+			LatencyMs:         time.Since(relayInfo.StartTime).Milliseconds(),
+			FrtMs:             frtMs,
+			IsStream:          relayInfo.IsStream,
+			Group:             relayInfo.UsingGroup,
+		})
+	}()
 
 	needSensitiveCheck := setting.ShouldCheckPromptSensitive()
 	needCountToken := constant.CountToken
