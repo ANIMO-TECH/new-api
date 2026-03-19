@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strings"
@@ -8,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/logutils"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
@@ -20,6 +22,16 @@ func formatNotifyType(channelId int, status int) string {
 // disable & notify
 func DisableChannel(channelError types.ChannelError, reason string) {
 	common.SysLog(fmt.Sprintf("通道「%s」（#%d）发生错误，准备禁用，原因：%s", channelError.ChannelName, channelError.ChannelId, reason))
+
+	logutils.Warn(context.Background()).
+		Str("log_source", "gateway").
+		Str("module", "channel_manage").
+		Int("channel_id", channelError.ChannelId).
+		Str("channel_name", channelError.ChannelName).
+		Str("action", "auto_disable").
+		Str("reason", reason).
+		Bool("alert", true).
+		Msg("channel auto disable triggered")
 
 	// 检查是否启用自动禁用功能
 	if !channelError.AutoBan {
@@ -38,6 +50,16 @@ func DisableChannel(channelError types.ChannelError, reason string) {
 func EnableChannel(channelId int, usingKey string, channelName string) {
 	success := model.UpdateChannelStatus(channelId, usingKey, common.ChannelStatusEnabled, "")
 	if success {
+		logutils.Warn(context.Background()).
+			Str("log_source", "gateway").
+			Str("module", "channel_manage").
+			Int("channel_id", channelId).
+			Str("channel_name", channelName).
+			Str("action", "auto_enable").
+			Str("reason", "channel test passed after auto-disable").
+			Bool("alert", true).
+			Msg("channel auto enable triggered")
+
 		subject := fmt.Sprintf("通道「%s」（#%d）已被启用", channelName, channelId)
 		content := fmt.Sprintf("通道「%s」（#%d）已被启用", channelName, channelId)
 		NotifyRootUser(formatNotifyType(channelId, common.ChannelStatusEnabled), subject, content)
