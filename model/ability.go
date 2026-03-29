@@ -264,6 +264,19 @@ func UpdateAbilityStatus(channelId int, status bool) error {
 	return DB.Model(&Ability{}).Where("channel_id = ?", channelId).Select("enabled").Update("enabled", status).Error
 }
 
+// CountEnabledAbilitiesForModel returns the number of enabled channels
+// for a given group+model pair from the database.
+func CountEnabledAbilitiesForModel(group string, model string) (int64, error) {
+	var count int64
+	err := DB.Model(&Ability{}).
+		Where(commonGroupCol+" = ? AND model = ? AND enabled = ?", group, model, commonTrueVal).
+		Count(&count).Error
+	if err != nil {
+		return 0, fmt.Errorf("count enabled abilities for group=%s model=%s: %w", group, model, err)
+	}
+	return count, nil
+}
+
 func UpdateAbilityStatusByTag(tag string, status bool) error {
 	return DB.Model(&Ability{}).Where("tag = ?", tag).Select("enabled").Update("enabled", status).Error
 }
