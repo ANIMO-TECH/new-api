@@ -292,6 +292,7 @@ func (r *GeneralOpenAIRequest) ParseInput() []string {
 type Message struct {
 	Role             string          `json:"role"`
 	Content          any             `json:"content"`
+	Images           any             `json:"images,omitempty"`
 	Name             *string         `json:"name,omitempty"`
 	Prefix           *bool           `json:"prefix,omitempty"`
 	ReasoningContent string          `json:"reasoning_content,omitempty"`
@@ -615,6 +616,60 @@ func (m *Message) ParseContent() []MediaContent {
 	if len(contentList) > 0 {
 		m.parsedContent = contentList
 	}
+	return contentList
+}
+
+func (m *Message) ParseImages() []MediaContent {
+	if m.Images == nil {
+		return nil
+	}
+
+	arrayImages, ok := m.Images.([]any)
+	if !ok {
+		return nil
+	}
+
+	contentList := make([]MediaContent, 0, len(arrayImages))
+	for _, imageItemAny := range arrayImages {
+		imageItem, ok := imageItemAny.(map[string]any)
+		if !ok {
+			continue
+		}
+
+		contentType, _ := imageItem["type"].(string)
+		if contentType != ContentTypeImageURL {
+			continue
+		}
+
+		imageUrl := imageItem["image_url"]
+		temp := &MessageImageUrl{
+			Detail: "high",
+		}
+
+		switch v := imageUrl.(type) {
+		case string:
+			temp.Url = v
+		case map[string]interface{}:
+			url, ok1 := v["url"].(string)
+			detail, ok2 := v["detail"].(string)
+			if ok2 {
+				temp.Detail = detail
+			}
+			if ok1 {
+				temp.Url = url
+			}
+		}
+
+		if temp.Url == "" {
+			continue
+		}
+
+		contentList = append(contentList, MediaContent{
+			Type:     ContentTypeImageURL,
+			ImageUrl: temp,
+		})
+	}
+
 	return contentList
 }
 

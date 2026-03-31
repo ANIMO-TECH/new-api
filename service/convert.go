@@ -867,6 +867,40 @@ func convertOpenAIMessageToGeminiParts(message dto.Message) []dto.GeminiPart {
 		}
 	}
 
+	// Some OAI-compatible providers return generated images in `message.images`
+	// instead of `message.content`, so merge these image items as well.
+	imageItems := message.ParseImages()
+	for _, item := range imageItems {
+		if item.Type != dto.ContentTypeImageURL {
+			continue
+		}
+		img := item.GetImageMedia()
+		if img == nil || strings.TrimSpace(img.Url) == "" {
+			continue
+		}
+		imageURL := strings.TrimSpace(img.Url)
+
+		if strings.HasPrefix(imageURL, "data:") || !strings.HasPrefix(imageURL, "http://") && !strings.HasPrefix(imageURL, "https://") {
+			mimeType, base64String, err := DecodeBase64FileData(imageURL)
+			if err == nil && mimeType != "" && base64String != "" {
+				parts = append(parts, dto.GeminiPart{
+					InlineData: &dto.GeminiInlineData{
+						MimeType: mimeType,
+						Data:     base64String,
+					},
+				})
+				continue
+			}
+		}
+
+		parts = append(parts, dto.GeminiPart{
+			FileData: &dto.GeminiFileData{
+				MimeType: img.MimeType,
+				FileUri:  imageURL,
+			},
+		})
+	}
+
 	// Fallback for non-standard payloads
 	if len(parts) == 0 {
 		appendGeminiPartsFromText(&parts, message.StringContent())
