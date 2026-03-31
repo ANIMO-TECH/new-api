@@ -779,6 +779,102 @@ func extractTextFromGeminiParts(parts []dto.GeminiPart) string {
 	return strings.Join(texts, "\n")
 }
 
+func appendGeminiPartsFromText(parts *[]dto.GeminiPart, text string) {
+	if text == "" {
+		return
+	}
+
+	remaining := text
+	for {
+		startIdx := strings.Index(remaining, "![")
+		if startIdx == -1 {
+			break
+		}
+
+		dataStartRel := strings.Index(remaining[startIdx:], "](data:")
+		if dataStartRel == -1 {
+			break
+		}
+		dataStartIdx := startIdx + dataStartRel + 2 // points to "data:"
+
+		dataEndRel := strings.Index(remaining[dataStartIdx:], ")")
+		if dataEndRel == -1 {
+			break
+		}
+		dataEndIdx := dataStartIdx + dataEndRel
+
+		if startIdx > 0 {
+			*parts = append(*parts, dto.GeminiPart{Text: remaining[:startIdx]})
+		}
+
+		dataURL := remaining[dataStartIdx:dataEndIdx]
+		mimeType, base64String, err := DecodeBase64FileData(dataURL)
+		if err != nil || mimeType == "" || base64String == "" {
+			break
+		}
+
+		*parts = append(*parts, dto.GeminiPart{
+			InlineData: &dto.GeminiInlineData{
+				MimeType: mimeType,
+				Data:     base64String,
+			},
+		})
+
+		remaining = remaining[dataEndIdx+1:]
+	}
+
+	if remaining != "" {
+		*parts = append(*parts, dto.GeminiPart{Text: remaining})
+	}
+}
+
+func convertOpenAIMessageToGeminiParts(message dto.Message) []dto.GeminiPart {
+	parts := make([]dto.GeminiPart, 0)
+
+	contentItems := message.ParseContent()
+	for _, item := range contentItems {
+		switch item.Type {
+		case dto.ContentTypeText:
+			appendGeminiPartsFromText(&parts, item.Text)
+		case dto.ContentTypeImageURL:
+			img := item.GetImageMedia()
+			if img == nil || strings.TrimSpace(img.Url) == "" {
+				continue
+			}
+			imageURL := strings.TrimSpace(img.Url)
+
+			// data URL / plain base64
+			if strings.HasPrefix(imageURL, "data:") || !strings.HasPrefix(imageURL, "http://") && !strings.HasPrefix(imageURL, "https://") {
+				mimeType, base64String, err := DecodeBase64FileData(imageURL)
+				if err == nil && mimeType != "" && base64String != "" {
+					parts = append(parts, dto.GeminiPart{
+						InlineData: &dto.GeminiInlineData{
+							MimeType: mimeType,
+							Data:     base64String,
+						},
+					})
+					continue
+				}
+			}
+
+			// remote URL fallback
+			parts = append(parts, dto.GeminiPart{
+				FileData: &dto.GeminiFileData{
+					MimeType: img.MimeType,
+					FileUri:  imageURL,
+				},
+			})
+		}
+	}
+
+	// Fallback for non-standard payloads
+	if len(parts) == 0 {
+		appendGeminiPartsFromText(&parts, message.StringContent())
+	}
+
+	return parts
+}
+
 // ResponseOpenAI2Gemini 将 OpenAI 响应转换为 Gemini 格式
 func ResponseOpenAI2Gemini(openAIResponse *dto.OpenAITextResponse, info *relaycommon.RelayInfo) *dto.GeminiChatResponse {
 	geminiResponse := &dto.GeminiChatResponse{
@@ -840,16 +936,9 @@ func ResponseOpenAI2Gemini(openAIResponse *dto.OpenAITextResponse, info *relayco
 				}
 				content.Parts = append(content.Parts, part)
 			}
-		} else {
-			// 处理文本内容
-			textContent := choice.Message.StringContent()
-			if textContent != "" {
-				part := dto.GeminiPart{
-					Text: textContent,
-				}
-				content.Parts = append(content.Parts, part)
-			}
 		}
+
+		content.Parts = append(content.Parts, convertOpenAIMessageToGeminiParts(choice.Message)...)
 
 		candidate.Content = content
 		geminiResponse.Candidates = append(geminiResponse.Candidates, candidate)
@@ -943,16 +1032,8 @@ func StreamResponseOpenAI2Gemini(openAIResponse *dto.ChatCompletionsStreamRespon
 				}
 				content.Parts = append(content.Parts, part)
 			}
-		} else {
-			// 处理文本内容
-			textContent := choice.Delta.GetContentString()
-			if textContent != "" {
-				part := dto.GeminiPart{
-					Text: textContent,
-				}
-				content.Parts = append(content.Parts, part)
-			}
 		}
+		appendGeminiPartsFromText(&content.Parts, choice.Delta.GetContentString())
 
 		candidate.Content = content
 		geminiResponse.Candidates = append(geminiResponse.Candidates, candidate)
