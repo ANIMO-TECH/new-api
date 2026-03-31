@@ -228,10 +228,53 @@ func CacheUpdateChannelStatus(id int, status int) {
 	}
 	channelSyncLock.Lock()
 	defer channelSyncLock.Unlock()
-	if channel, ok := channelsIDM[id]; ok {
-		channel.Status = status
+	channel, ok := channelsIDM[id]
+	if !ok {
+		return
 	}
-	if status != common.ChannelStatusEnabled {
+	channel.Status = status
+	if status == common.ChannelStatusEnabled {
+		// add the channel back to group2model2channels
+		groups := strings.Split(channel.Group, ",")
+		models := strings.Split(channel.Models, ",")
+		for _, group := range groups {
+			group = strings.TrimSpace(group)
+			if group == "" {
+				continue
+			}
+			if group2model2channels[group] == nil {
+				group2model2channels[group] = make(map[string][]int)
+			}
+			for _, model := range models {
+				model = strings.TrimSpace(model)
+				if model == "" {
+					continue
+				}
+				// avoid duplicates
+				existing := group2model2channels[group][model]
+				found := false
+				for _, cid := range existing {
+					if cid == id {
+						found = true
+						break
+					}
+				}
+				if !found {
+					updated := append(existing, id)
+					// maintain priority order consistent with InitChannelCache
+					sort.Slice(updated, func(i, j int) bool {
+						ci, oki := channelsIDM[updated[i]]
+						cj, okj := channelsIDM[updated[j]]
+						if !oki || !okj {
+							return oki
+						}
+						return ci.GetPriority() > cj.GetPriority()
+					})
+					group2model2channels[group][model] = updated
+				}
+			}
+		}
+	} else {
 		// delete the channel from group2model2channels
 		for group, model2channels := range group2model2channels {
 			for model, channels := range model2channels {
@@ -245,6 +288,18 @@ func CacheUpdateChannelStatus(id int, status int) {
 			}
 		}
 	}
+}
+
+// CacheCountEnabledChannelsForModel returns the number of enabled channels
+// for a given group+model pair from the in-memory cache.
+// Returns -1 if memory cache is not enabled.
+func CacheCountEnabledChannelsForModel(group string, model string) int {
+	if !common.MemoryCacheEnabled {
+		return -1
+	}
+	channelSyncLock.RLock()
+	defer channelSyncLock.RUnlock()
+	return len(group2model2channels[group][model])
 }
 
 func CacheUpdateChannel(channel *Channel) {
