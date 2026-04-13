@@ -46,6 +46,10 @@ func InitOptionMap() {
 	common.OptionMap["RegisterEnabled"] = strconv.FormatBool(common.RegisterEnabled)
 	common.OptionMap["AutomaticDisableChannelEnabled"] = strconv.FormatBool(common.AutomaticDisableChannelEnabled)
 	common.OptionMap["AutomaticEnableChannelEnabled"] = strconv.FormatBool(common.AutomaticEnableChannelEnabled)
+	common.OptionMap["AutomaticReviveChannelEnabled"] = strconv.FormatBool(common.AutomaticReviveChannelEnabled)
+	common.OptionMap["AutomaticDisableBackoffBaseSeconds"] = strconv.Itoa(common.AutomaticDisableBackoffBaseSeconds)
+	common.OptionMap["AutomaticDisableBackoffMultiplier"] = strconv.FormatFloat(common.AutomaticDisableBackoffMultiplier, 'f', -1, 64)
+	common.OptionMap["AutomaticDisableMaxReviveTimes"] = strconv.Itoa(common.AutomaticDisableMaxReviveTimes)
 	common.OptionMap["LogConsumeEnabled"] = strconv.FormatBool(common.LogConsumeEnabled)
 	common.OptionMap["DisplayInCurrencyEnabled"] = strconv.FormatBool(common.DisplayInCurrencyEnabled)
 	common.OptionMap["DisplayTokenStatEnabled"] = strconv.FormatBool(common.DisplayTokenStatEnabled)
@@ -247,6 +251,8 @@ func updateOptionMap(key string, value string) (err error) {
 			common.AutomaticDisableChannelEnabled = boolValue
 		case "AutomaticEnableChannelEnabled":
 			common.AutomaticEnableChannelEnabled = boolValue
+		case "AutomaticReviveChannelEnabled":
+			common.AutomaticReviveChannelEnabled = boolValue
 		case "LogConsumeEnabled":
 			common.LogConsumeEnabled = boolValue
 		case "DisplayInCurrencyEnabled":
@@ -399,6 +405,12 @@ func updateOptionMap(key string, value string) (err error) {
 		common.QuotaForInvitee, _ = strconv.Atoi(value)
 	case "QuotaRemindThreshold":
 		common.QuotaRemindThreshold, _ = strconv.Atoi(value)
+	case "AutomaticDisableBackoffBaseSeconds":
+		common.AutomaticDisableBackoffBaseSeconds, _ = strconv.Atoi(value)
+	case "AutomaticDisableBackoffMultiplier":
+		common.AutomaticDisableBackoffMultiplier, _ = strconv.ParseFloat(value, 64)
+	case "AutomaticDisableMaxReviveTimes":
+		common.AutomaticDisableMaxReviveTimes, _ = strconv.Atoi(value)
 	case "PreConsumedQuota":
 		common.PreConsumedQuota, _ = strconv.Atoi(value)
 	case "ModelRequestRateLimitCount":

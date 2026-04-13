@@ -67,6 +67,9 @@ type ChannelInfo struct {
 	MultiKeyDisabledTime   map[int]int64         `json:"multi_key_disabled_time,omitempty"`   // key禁用时间列表，key index -> time
 	MultiKeyPollingIndex   int                   `json:"multi_key_polling_index"`             // 多Key模式下轮询的key索引
 	MultiKeyMode           constant.MultiKeyMode `json:"multi_key_mode"`
+	AutoDisableUntil       int64                 `json:"auto_disable_until,omitempty"`
+	AutoDisableCount       int                   `json:"auto_disable_count,omitempty"`
+	AutoReviveCount        int                   `json:"auto_revive_count,omitempty"`
 }
 
 // Value implements driver.Valuer interface
@@ -193,6 +196,84 @@ func (channel *Channel) GetNextEnabledKey() (string, int, *types.NewAPIError) {
 
 func (channel *Channel) SaveChannelInfo() error {
 	return DB.Model(channel).Update("channel_info", channel.ChannelInfo).Error
+}
+
+func resetChannelAutoDisableState(info *ChannelInfo) {
+	info.AutoDisableUntil = 0
+	info.AutoDisableCount = 0
+	info.AutoReviveCount = 0
+}
+
+func ResetChannelAutoDisableState(channelId int) error {
+	channelStatusLock.Lock()
+	defer channelStatusLock.Unlock()
+
+	channel, err := GetChannelById(channelId, true)
+	if err != nil {
+		return err
+	}
+	resetChannelAutoDisableState(&channel.ChannelInfo)
+	if err = channel.SaveWithoutKey(); err != nil {
+		return err
+	}
+
+	if common.MemoryCacheEnabled {
+		channelSyncLock.Lock()
+		if cached, ok := channelsIDM[channelId]; ok {
+			resetChannelAutoDisableState(&cached.ChannelInfo)
+		}
+		channelSyncLock.Unlock()
+	}
+	return nil
+}
+
+func TryAutoReviveChannel(channelId int) (*Channel, bool, error) {
+	if !common.AutomaticReviveChannelEnabled || common.AutomaticDisableMaxReviveTimes <= 0 {
+		return nil, false, nil
+	}
+
+	channelStatusLock.Lock()
+	defer channelStatusLock.Unlock()
+
+	channel, err := GetChannelById(channelId, true)
+	if err != nil {
+		return nil, false, err
+	}
+	if channel.Status != common.ChannelStatusAutoDisabled {
+		return channel, false, nil
+	}
+	if channel.ChannelInfo.AutoDisableUntil <= 0 || channel.ChannelInfo.AutoDisableUntil > common.GetTimestamp() {
+		return channel, false, nil
+	}
+	if channel.ChannelInfo.AutoReviveCount >= common.AutomaticDisableMaxReviveTimes {
+		return channel, false, nil
+	}
+
+	channel.ChannelInfo.AutoDisableUntil = 0
+	channel.ChannelInfo.AutoReviveCount++
+	info := channel.GetOtherInfo()
+	info["status_reason"] = "Auto revived after backoff"
+	info["status_time"] = common.GetTimestamp()
+	channel.SetOtherInfo(info)
+	channel.Status = common.ChannelStatusEnabled
+	if err = channel.SaveWithoutKey(); err != nil {
+		return nil, false, err
+	}
+	if err = UpdateAbilityStatus(channelId, true); err != nil {
+		return nil, false, err
+	}
+
+	if common.MemoryCacheEnabled {
+		channelSyncLock.Lock()
+		if cached, ok := channelsIDM[channelId]; ok {
+			cached.ChannelInfo = channel.ChannelInfo
+			cached.OtherInfo = channel.OtherInfo
+		}
+		channelSyncLock.Unlock()
+		CacheUpdateChannelStatus(channelId, common.ChannelStatusEnabled)
+	}
+
+	return channel, true, nil
 }
 
 func (channel *Channel) GetModels() []string {
@@ -682,12 +763,32 @@ func UpdateChannelStatus(channelId int, usingKey string, status int, reason stri
 }
 
 func EnableChannelByTag(tag string) error {
-	err := DB.Model(&Channel{}).Where("tag = ?", tag).Update("status", common.ChannelStatusEnabled).Error
+	var channels []*Channel
+	if err := DB.Where("tag = ?", tag).Find(&channels).Error; err != nil {
+		return err
+	}
+	for _, channel := range channels {
+		resetChannelAutoDisableState(&channel.ChannelInfo)
+		channel.Status = common.ChannelStatusEnabled
+		if err := channel.SaveWithoutKey(); err != nil {
+			return err
+		}
+	}
+	if common.MemoryCacheEnabled {
+		for _, channel := range channels {
+			channelSyncLock.Lock()
+			if cached, ok := channelsIDM[channel.Id]; ok {
+				resetChannelAutoDisableState(&cached.ChannelInfo)
+			}
+			channelSyncLock.Unlock()
+			CacheUpdateChannelStatus(channel.Id, common.ChannelStatusEnabled)
+		}
+	}
+	err := UpdateAbilityStatusByTag(tag, true)
 	if err != nil {
 		return err
 	}
-	err = UpdateAbilityStatusByTag(tag, true)
-	return err
+	return nil
 }
 
 func DisableChannelByTag(tag string) error {

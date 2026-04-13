@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"math"
 	"net/http"
 	"strings"
 
@@ -40,6 +41,10 @@ func DisableChannel(channelError types.ChannelError, reason string) {
 		return
 	}
 
+	if err := prepareChannelAutoDisable(channelError.ChannelId); err != nil {
+		common.SysLog(fmt.Sprintf("通道「%s」（#%d）更新自动禁用退避状态失败: %v", channelError.ChannelName, channelError.ChannelId, err))
+	}
+
 	success := model.UpdateChannelStatus(channelError.ChannelId, channelError.UsingKey, common.ChannelStatusAutoDisabled, reason)
 	if success {
 		// Check which models are now fully unavailable
@@ -51,6 +56,42 @@ func DisableChannel(channelError types.ChannelError, reason string) {
 			NotifyRootUser(formatNotifyType(channelError.ChannelId, common.ChannelStatusAutoDisabled), subject, content)
 		}
 	}
+}
+
+func prepareChannelAutoDisable(channelId int) error {
+	channel, err := model.GetChannelById(channelId, true)
+	if err != nil {
+		return err
+	}
+
+	if common.AutomaticDisableMaxReviveTimes <= 0 {
+		channel.ChannelInfo.AutoDisableUntil = 0
+	} else {
+		channel.ChannelInfo.AutoDisableCount++
+		if channel.ChannelInfo.AutoDisableCount < 1 {
+			channel.ChannelInfo.AutoDisableCount = 1
+		}
+		delaySeconds := float64(common.AutomaticDisableBackoffBaseSeconds)
+		if delaySeconds < 1 {
+			delaySeconds = 1
+		}
+		multiplier := common.AutomaticDisableBackoffMultiplier
+		if multiplier < 1 {
+			multiplier = 1
+		}
+		delaySeconds = delaySeconds * math.Pow(multiplier, float64(channel.ChannelInfo.AutoDisableCount-1))
+		channel.ChannelInfo.AutoDisableUntil = common.GetTimestamp() + int64(math.Round(delaySeconds))
+	}
+
+	if err = channel.SaveChannelInfo(); err != nil {
+		return err
+	}
+	if common.MemoryCacheEnabled {
+		if cached, cacheErr := model.CacheGetChannel(channelId); cacheErr == nil && cached != nil {
+			cached.ChannelInfo = channel.ChannelInfo
+		}
+	}
+	return nil
 }
 
 func EnableChannel(channelId int, usingKey string, channelName string) {
@@ -86,7 +127,7 @@ func EnableChannel(channelId int, usingKey string, channelName string) {
 				modelList := strings.Join(recovered, ", ")
 				subject := fmt.Sprintf("通道「%s」（#%d）已被启用，以下模型恢复可用", channelName, channelId)
 				content := fmt.Sprintf("通道「%s」（#%d）已被启用，以下模型恢复可用: %s", channelName, channelId, modelList)
-					NotifyRootUser(formatNotifyType(channelId, common.ChannelStatusEnabled), subject, content)
+				NotifyRootUser(formatNotifyType(channelId, common.ChannelStatusEnabled), subject, content)
 			}
 		}
 	}

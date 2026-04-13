@@ -99,6 +99,8 @@ func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel,
 		return GetChannel(group, model, retry)
 	}
 
+	tryReviveMatchedChannels(group, model)
+
 	channelSyncLock.RLock()
 	defer channelSyncLock.RUnlock()
 
@@ -188,6 +190,50 @@ func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel,
 	}
 	// return null if no channel is not found
 	return nil, errors.New("channel not found")
+}
+
+func tryReviveMatchedChannels(group string, model string) {
+	if !common.AutomaticReviveChannelEnabled || common.AutomaticDisableMaxReviveTimes <= 0 {
+		return
+	}
+
+	channelSyncLock.RLock()
+	candidates := make([]int, 0)
+	normalizedModel := ratio_setting.FormatMatchingModelName(model)
+	for _, channel := range channelsIDM {
+		if channel == nil || channel.Status != common.ChannelStatusAutoDisabled {
+			continue
+		}
+		if !channelHasGroup(channel, group) {
+			continue
+		}
+		if channelHasModel(channel, model) || (normalizedModel != model && channelHasModel(channel, normalizedModel)) {
+			candidates = append(candidates, channel.Id)
+		}
+	}
+	channelSyncLock.RUnlock()
+
+	for _, channelId := range candidates {
+		_, _, _ = TryAutoReviveChannel(channelId)
+	}
+}
+
+func channelHasGroup(channel *Channel, group string) bool {
+	for _, item := range channel.GetGroups() {
+		if item == group {
+			return true
+		}
+	}
+	return false
+}
+
+func channelHasModel(channel *Channel, model string) bool {
+	for _, item := range channel.GetModels() {
+		if item == model {
+			return true
+		}
+	}
+	return false
 }
 
 func CacheGetChannel(id int) (*Channel, error) {

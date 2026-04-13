@@ -70,6 +70,10 @@ const OperationSetting = () => {
     QuotaRemindThreshold: 0,
     AutomaticDisableChannelEnabled: false,
     AutomaticEnableChannelEnabled: false,
+    AutomaticReviveChannelEnabled: false,
+    AutomaticDisableBackoffBaseSeconds: 60,
+    AutomaticDisableBackoffMultiplier: 2,
+    AutomaticDisableMaxReviveTimes: 0,
     AutomaticDisableKeywords: '',
     AutomaticDisableStatusCodes: '401',
     AutomaticRetryStatusCodes:

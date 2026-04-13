@@ -1013,6 +1013,11 @@ func UpdateChannel(c *gin.Context) {
 
 	// Always copy the original ChannelInfo so that fields like IsMultiKey and MultiKeySize are retained.
 	channel.ChannelInfo = originChannel.ChannelInfo
+	if channel.Status == common.ChannelStatusEnabled && originChannel.Status != common.ChannelStatusEnabled {
+		channel.ChannelInfo.AutoDisableUntil = 0
+		channel.ChannelInfo.AutoDisableCount = 0
+		channel.ChannelInfo.AutoReviveCount = 0
+	}
 
 	// If the request explicitly specifies a new MultiKeyMode, apply it on top of the original info.
 	if channel.MultiKeyMode != nil && *channel.MultiKeyMode != "" {

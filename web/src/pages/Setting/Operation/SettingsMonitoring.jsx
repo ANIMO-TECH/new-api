@@ -38,6 +38,10 @@ export default function SettingsMonitoring(props) {
     QuotaRemindThreshold: '',
     AutomaticDisableChannelEnabled: false,
     AutomaticEnableChannelEnabled: false,
+    AutomaticReviveChannelEnabled: false,
+    AutomaticDisableBackoffBaseSeconds: 60,
+    AutomaticDisableBackoffMultiplier: 2,
+    AutomaticDisableMaxReviveTimes: 0,
     AutomaticDisableKeywords: '',
     AutomaticDisableStatusCodes: '401',
     AutomaticRetryStatusCodes:
@@ -248,6 +252,85 @@ export default function SettingsMonitoring(props) {
                     setInputs({
                       ...inputs,
                       AutomaticEnableChannelEnabled: value,
+                    })
+                  }
+                />
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.Switch
+                  field={'AutomaticReviveChannelEnabled'}
+                  label={t('到期后自动复活通道')}
+                  size='default'
+                  checkedText='｜'
+                  uncheckedText='〇'
+                  disabled={!inputs.AutomaticDisableChannelEnabled}
+                  onChange={(value) =>
+                    setInputs({
+                      ...inputs,
+                      AutomaticReviveChannelEnabled: value,
+                    })
+                  }
+                />
+              </Col>
+            </Row>
+            <Row gutter={16}>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.InputNumber
+                  label={t('首次禁用时长')}
+                  step={1}
+                  min={1}
+                  suffix={t('秒')}
+                  extraText={t('最大复活次数大于 0 时生效')}
+                  placeholder={''}
+                  field={'AutomaticDisableBackoffBaseSeconds'}
+                  disabled={
+                    !inputs.AutomaticDisableChannelEnabled ||
+                    !inputs.AutomaticReviveChannelEnabled
+                  }
+                  onChange={(value) =>
+                    setInputs({
+                      ...inputs,
+                      AutomaticDisableBackoffBaseSeconds: parseInt(value),
+                    })
+                  }
+                />
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.InputNumber
+                  label={t('退避倍率')}
+                  step={0.1}
+                  min={1}
+                  extraText={t('每次自动禁用后，按该倍率递增禁用时长')}
+                  placeholder={''}
+                  field={'AutomaticDisableBackoffMultiplier'}
+                  disabled={
+                    !inputs.AutomaticDisableChannelEnabled ||
+                    !inputs.AutomaticReviveChannelEnabled
+                  }
+                  onChange={(value) =>
+                    setInputs({
+                      ...inputs,
+                      AutomaticDisableBackoffMultiplier: Number(value),
+                    })
+                  }
+                />
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.InputNumber
+                  label={t('最大复活次数')}
+                  step={1}
+                  min={0}
+                  extraText={t('为 0 时不自动复活，行为等同于直接禁用')}
+                  placeholder={''}
+                  field={'AutomaticDisableMaxReviveTimes'}
+                  disabled={
+                    !inputs.AutomaticDisableChannelEnabled ||
+                    !inputs.AutomaticReviveChannelEnabled
+                  }
+                  onChange={(value) =>
+                    setInputs({
+                      ...inputs,
+                      AutomaticDisableMaxReviveTimes: parseInt(value),
                     })
                   }
                 />

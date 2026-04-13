@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 
 	"github.com/samber/lo"
 	"gorm.io/gorm"
@@ -104,6 +105,8 @@ func getChannelQuery(group string, model string, retry int) (*gorm.DB, error) {
 }
 
 func GetChannel(group string, model string, retry int) (*Channel, error) {
+	tryReviveAutoDisabledChannelsFromDB(group, model)
+
 	var abilities []Ability
 
 	var err error = nil
@@ -141,6 +144,50 @@ func GetChannel(group string, model string, retry int) (*Channel, error) {
 	}
 	err = DB.First(&channel, "id = ?", channel.Id).Error
 	return &channel, err
+}
+
+func tryReviveAutoDisabledChannelsFromDB(group string, model string) {
+	if !common.AutomaticReviveChannelEnabled || common.AutomaticDisableMaxReviveTimes <= 0 {
+		return
+	}
+
+	var channels []*Channel
+	groupLike := "%," + group + ",%"
+	modelLike := "%," + model + ",%"
+	query := DB.Where("status = ?", common.ChannelStatusAutoDisabled).
+		Where("(',' || "+commonGroupCol+" || ',') LIKE ?", groupLike).
+		Where("(',' || models || ',') LIKE ?", modelLike)
+	if common.UsingMySQL {
+		query = DB.Where("status = ?", common.ChannelStatusAutoDisabled).
+			Where("CONCAT(',', "+commonGroupCol+", ',') LIKE ?", groupLike).
+			Where("CONCAT(',', models, ',') LIKE ?", modelLike)
+	}
+	if err := query.Find(&channels).Error; err != nil {
+		return
+	}
+	for _, channel := range channels {
+		_, _, _ = TryAutoReviveChannel(channel.Id)
+	}
+
+	normalizedModel := ratio_setting.FormatMatchingModelName(model)
+	if normalizedModel == model {
+		return
+	}
+	modelLike = "%," + normalizedModel + ",%"
+	query = DB.Where("status = ?", common.ChannelStatusAutoDisabled).
+		Where("(',' || "+commonGroupCol+" || ',') LIKE ?", groupLike).
+		Where("(',' || models || ',') LIKE ?", modelLike)
+	if common.UsingMySQL {
+		query = DB.Where("status = ?", common.ChannelStatusAutoDisabled).
+			Where("CONCAT(',', "+commonGroupCol+", ',') LIKE ?", groupLike).
+			Where("CONCAT(',', models, ',') LIKE ?", modelLike)
+	}
+	if err := query.Find(&channels).Error; err != nil {
+		return
+	}
+	for _, channel := range channels {
+		_, _, _ = TryAutoReviveChannel(channel.Id)
+	}
 }
 
 func (channel *Channel) AddAbilities(tx *gorm.DB) error {
