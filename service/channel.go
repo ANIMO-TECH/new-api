@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -19,6 +20,10 @@ import (
 
 func formatNotifyType(channelId int, status int) string {
 	return fmt.Sprintf("%s_%d_%d", dto.NotifyTypeChannelUpdate, channelId, status)
+}
+
+func init() {
+	model.ChannelReviveExhaustedNotifier = NotifyChannelReviveExhausted
 }
 
 // disable & notify
@@ -55,6 +60,7 @@ func DisableChannel(channelError types.ChannelError, reason string) {
 			content := fmt.Sprintf("通道「%s」（#%d）已被禁用，原因：%s\n以下模型已无可用渠道: %s", channelError.ChannelName, channelError.ChannelId, reason, modelList)
 			NotifyRootUser(formatNotifyType(channelError.ChannelId, common.ChannelStatusAutoDisabled), subject, content)
 		}
+		notifyModelsBelowAlertThreshold(channelError.ChannelId, channelError.ChannelName, reason)
 	}
 }
 
@@ -82,6 +88,7 @@ func prepareChannelAutoDisable(channelId int) error {
 		delaySeconds = delaySeconds * math.Pow(multiplier, float64(channel.ChannelInfo.AutoDisableCount-1))
 		channel.ChannelInfo.AutoDisableUntil = common.GetTimestamp() + int64(math.Round(delaySeconds))
 	}
+	channel.ChannelInfo.AutoReviveExhaustedNotified = false
 
 	if err = channel.SaveChannelInfo(); err != nil {
 		return err
@@ -283,4 +290,140 @@ func countEnabledForGroupModel(group string, modelName string) int64 {
 		return -1
 	}
 	return dbCount
+}
+
+func countAvailableChannelsForAlert(group string, modelName string) int64 {
+	count := countEnabledForGroupModel(group, modelName)
+	if count == -1 {
+		return -1
+	}
+	normalized := ratio_setting.FormatMatchingModelName(modelName)
+	if normalized != modelName {
+		normalizedCount := countEnabledForGroupModel(group, normalized)
+		if normalizedCount == -1 {
+			return -1
+		}
+		if normalizedCount > count {
+			count = normalizedCount
+		}
+	}
+	return count
+}
+
+func notifyModelsBelowAlertThreshold(channelId int, channelName string, reason string) {
+	channel, err := model.CacheGetChannel(channelId)
+	if err != nil || channel == nil {
+		return
+	}
+
+	type alertItem struct {
+		Group     string
+		ModelName string
+		Available int64
+		Threshold int
+	}
+
+	alertMap := make(map[string]alertItem)
+	for _, group := range channel.GetGroups() {
+		for _, runtimeModel := range channel.GetModels() {
+			alertModels, matchErr := model.GetAlertModelsForRuntimeModel(runtimeModel)
+			if matchErr != nil {
+				continue
+			}
+			for _, alertModel := range alertModels {
+				if alertModel == nil || alertModel.ChannelAlertThreshold <= 0 {
+					continue
+				}
+				availableCount := countAvailableChannelsForAlert(group, runtimeModel)
+				if availableCount == -1 || availableCount >= int64(alertModel.ChannelAlertThreshold) {
+					continue
+				}
+				key := group + "||" + alertModel.ModelName
+				current, exists := alertMap[key]
+				if !exists || availableCount < current.Available {
+					alertMap[key] = alertItem{
+						Group:     group,
+						ModelName: alertModel.ModelName,
+						Available: availableCount,
+						Threshold: alertModel.ChannelAlertThreshold,
+					}
+				}
+			}
+		}
+	}
+
+	if len(alertMap) == 0 {
+		return
+	}
+
+	items := make([]alertItem, 0, len(alertMap))
+	for _, item := range alertMap {
+		items = append(items, item)
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Group == items[j].Group {
+			return items[i].ModelName < items[j].ModelName
+		}
+		return items[i].Group < items[j].Group
+	})
+
+	for _, item := range items {
+		subject := fmt.Sprintf("模型「%s」可用渠道不足", item.ModelName)
+		content := fmt.Sprintf("通道「%s」（#%d）已被禁用，原因：%s\n模型「%s」在分组「%s」下剩余启用渠道数为 %d，低于告警阈值 %d。", channelName, channelId, reason, item.ModelName, item.Group, item.Available, item.Threshold)
+		NotifyRootUser(fmt.Sprintf("%s_low_%s_%s", dto.NotifyTypeModelAlert, item.Group, item.ModelName), subject, content)
+	}
+}
+
+func NotifyChannelReviveExhausted(channel *model.Channel) {
+	if channel == nil {
+		return
+	}
+
+	type alertItem struct {
+		Group     string
+		ModelName string
+	}
+
+	alertMap := make(map[string]alertItem)
+	for _, group := range channel.GetGroups() {
+		for _, runtimeModel := range channel.GetModels() {
+			alertModels, err := model.GetAlertModelsForRuntimeModel(runtimeModel)
+			if err != nil {
+				continue
+			}
+			for _, alertModel := range alertModels {
+				if alertModel == nil || !alertModel.AlertOnReviveExhausted {
+					continue
+				}
+				key := group + "||" + alertModel.ModelName
+				alertMap[key] = alertItem{
+					Group:     group,
+					ModelName: alertModel.ModelName,
+				}
+			}
+		}
+	}
+
+	if len(alertMap) == 0 {
+		return
+	}
+
+	items := make([]alertItem, 0, len(alertMap))
+	for _, item := range alertMap {
+		items = append(items, item)
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Group == items[j].Group {
+			return items[i].ModelName < items[j].ModelName
+		}
+		return items[i].Group < items[j].Group
+	})
+
+	modelGroups := make([]string, 0, len(items))
+	for _, item := range items {
+		modelGroups = append(modelGroups, fmt.Sprintf("%s（分组：%s）", item.ModelName, item.Group))
+	}
+	subject := fmt.Sprintf("通道「%s」（#%d）已长期禁用", channel.Name, channel.Id)
+	content := fmt.Sprintf("通道「%s」（#%d）达到最大自动复活次数 %d，后续将保持自动禁用状态。\n受影响模型：%s", channel.Name, channel.Id, common.AutomaticDisableMaxReviveTimes, strings.Join(modelGroups, "、"))
+	NotifyRootUser(fmt.Sprintf("%s_exhausted_%d", dto.NotifyTypeModelAlert, channel.Id), subject, content)
 }

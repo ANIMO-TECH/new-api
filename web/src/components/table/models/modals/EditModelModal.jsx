@@ -124,7 +124,8 @@ const EditModelModal = (props) => {
     name_rule: props.editingModel?.model_name ? 0 : undefined, // 通过未配置模型过来的固定为精确匹配
     status: true,
     sync_official: true,
-
+    channel_alert_threshold: 0,
+    alert_on_revive_exhausted: false,
   });
 
   const handleCancel = () => {
@@ -524,6 +525,29 @@ const EditModelModal = (props) => {
                           </Space>
                         )
                       }
+                    />
+                  </Col>
+                  <Col span={24}>
+                    <Form.InputNumber
+                      field='channel_alert_threshold'
+                      label={t('渠道不足告警阈值')}
+                      placeholder={t('0 表示关闭')}
+                      min={0}
+                      step={1}
+                      extraText={t(
+                        '当该模型在某个分组下剩余启用渠道数小于该值时，发送通知',
+                      )}
+                      style={{ width: '100%' }}
+                    />
+                  </Col>
+                  <Col span={24}>
+                    <Form.Switch
+                      field='alert_on_revive_exhausted'
+                      label={t('长期禁用时告警')}
+                      extraText={t(
+                        '当相关通道达到最大自动复活次数、后续不再自动复活时发送通知',
+                      )}
+                      size='large'
                     />
                   </Col>
                   <Col span={24}>

@@ -60,16 +60,17 @@ type Channel struct {
 }
 
 type ChannelInfo struct {
-	IsMultiKey             bool                  `json:"is_multi_key"`                        // 是否多Key模式
-	MultiKeySize           int                   `json:"multi_key_size"`                      // 多Key模式下的Key数量
-	MultiKeyStatusList     map[int]int           `json:"multi_key_status_list"`               // key状态列表，key index -> status
-	MultiKeyDisabledReason map[int]string        `json:"multi_key_disabled_reason,omitempty"` // key禁用原因列表，key index -> reason
-	MultiKeyDisabledTime   map[int]int64         `json:"multi_key_disabled_time,omitempty"`   // key禁用时间列表，key index -> time
-	MultiKeyPollingIndex   int                   `json:"multi_key_polling_index"`             // 多Key模式下轮询的key索引
-	MultiKeyMode           constant.MultiKeyMode `json:"multi_key_mode"`
-	AutoDisableUntil       int64                 `json:"auto_disable_until,omitempty"`
-	AutoDisableCount       int                   `json:"auto_disable_count,omitempty"`
-	AutoReviveCount        int                   `json:"auto_revive_count,omitempty"`
+	IsMultiKey                  bool                  `json:"is_multi_key"`                        // 是否多Key模式
+	MultiKeySize                int                   `json:"multi_key_size"`                      // 多Key模式下的Key数量
+	MultiKeyStatusList          map[int]int           `json:"multi_key_status_list"`               // key状态列表，key index -> status
+	MultiKeyDisabledReason      map[int]string        `json:"multi_key_disabled_reason,omitempty"` // key禁用原因列表，key index -> reason
+	MultiKeyDisabledTime        map[int]int64         `json:"multi_key_disabled_time,omitempty"`   // key禁用时间列表，key index -> time
+	MultiKeyPollingIndex        int                   `json:"multi_key_polling_index"`             // 多Key模式下轮询的key索引
+	MultiKeyMode                constant.MultiKeyMode `json:"multi_key_mode"`
+	AutoDisableUntil            int64                 `json:"auto_disable_until,omitempty"`
+	AutoDisableCount            int                   `json:"auto_disable_count,omitempty"`
+	AutoReviveCount             int                   `json:"auto_revive_count,omitempty"`
+	AutoReviveExhaustedNotified bool                  `json:"auto_revive_exhausted_notified,omitempty"`
 }
 
 // Value implements driver.Valuer interface
@@ -202,6 +203,7 @@ func resetChannelAutoDisableState(info *ChannelInfo) {
 	info.AutoDisableUntil = 0
 	info.AutoDisableCount = 0
 	info.AutoReviveCount = 0
+	info.AutoReviveExhaustedNotified = false
 }
 
 func ResetChannelAutoDisableState(channelId int) error {
@@ -246,6 +248,22 @@ func TryAutoReviveChannel(channelId int) (*Channel, bool, error) {
 		return channel, false, nil
 	}
 	if channel.ChannelInfo.AutoReviveCount >= common.AutomaticDisableMaxReviveTimes {
+		if !channel.ChannelInfo.AutoReviveExhaustedNotified {
+			if ChannelReviveExhaustedNotifier != nil {
+				ChannelReviveExhaustedNotifier(channel)
+			}
+			channel.ChannelInfo.AutoReviveExhaustedNotified = true
+			if err = channel.SaveChannelInfo(); err != nil {
+				return nil, false, err
+			}
+			if common.MemoryCacheEnabled {
+				channelSyncLock.Lock()
+				if cached, ok := channelsIDM[channelId]; ok {
+					cached.ChannelInfo = channel.ChannelInfo
+				}
+				channelSyncLock.Unlock()
+			}
+		}
 		return channel, false, nil
 	}
 
@@ -618,6 +636,7 @@ func (channel *Channel) Delete() error {
 }
 
 var channelStatusLock sync.Mutex
+var ChannelReviveExhaustedNotifier func(*Channel)
 
 // channelPollingLocks stores locks for each channel.id to ensure thread-safe polling
 var channelPollingLocks sync.Map
