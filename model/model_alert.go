@@ -17,6 +17,9 @@ func GetAlertModelsForRuntimeModel(runtimeModelName string) ([]*Model, error) {
 		if item == nil {
 			continue
 		}
+		if item.Status != 1 {
+			continue
+		}
 		switch item.NameRule {
 		case NameRuleExact:
 			if item.ModelName == runtimeModelName {

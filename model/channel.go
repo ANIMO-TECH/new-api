@@ -234,6 +234,8 @@ func TryAutoReviveChannel(channelId int) (*Channel, bool, error) {
 		return nil, false, nil
 	}
 
+	var exhaustedNotifyChannel *Channel
+
 	channelStatusLock.Lock()
 	defer channelStatusLock.Unlock()
 
@@ -249,9 +251,6 @@ func TryAutoReviveChannel(channelId int) (*Channel, bool, error) {
 	}
 	if channel.ChannelInfo.AutoReviveCount >= common.AutomaticDisableMaxReviveTimes {
 		if !channel.ChannelInfo.AutoReviveExhaustedNotified {
-			if ChannelReviveExhaustedNotifier != nil {
-				ChannelReviveExhaustedNotifier(channel)
-			}
 			channel.ChannelInfo.AutoReviveExhaustedNotified = true
 			if err = channel.SaveChannelInfo(); err != nil {
 				return nil, false, err
@@ -263,8 +262,18 @@ func TryAutoReviveChannel(channelId int) (*Channel, bool, error) {
 				}
 				channelSyncLock.Unlock()
 			}
+			if ChannelReviveExhaustedNotifier != nil {
+				channelCopy := *channel
+				exhaustedNotifyChannel = &channelCopy
+			}
 		}
-		return channel, false, nil
+		resultChannel := channel
+		channelStatusLock.Unlock()
+		if exhaustedNotifyChannel != nil {
+			ChannelReviveExhaustedNotifier(exhaustedNotifyChannel)
+		}
+		channelStatusLock.Lock()
+		return resultChannel, false, nil
 	}
 
 	channel.ChannelInfo.AutoDisableUntil = 0
