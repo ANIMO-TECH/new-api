@@ -4,12 +4,10 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"net/http"
 	"sort"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logutils"
 	"github.com/QuantumNous/new-api/model"
@@ -28,7 +26,7 @@ func init() {
 
 // disable & notify
 func DisableChannel(channelError types.ChannelError, reason string) {
-	common.SysLog(fmt.Sprintf("通道「%s」（#%d）发生错误，准备禁用，原因：%s", channelError.ChannelName, channelError.ChannelId, reason))
+	common.SysLog(fmt.Sprintf("通道「%s」（#%d）发生错误，准备禁用，原因：%s", channelError.ChannelName, channelError.ChannelId, common.LocalLogPreview(reason)))
 
 	logutils.Warn(context.Background()).
 		Str("log_source", "gateway").
@@ -140,7 +138,7 @@ func EnableChannel(channelId int, usingKey string, channelName string) {
 	}
 }
 
-func ShouldDisableChannel(channelType int, err *types.NewAPIError) bool {
+func ShouldDisableChannel(err *types.NewAPIError) bool {
 	if !common.AutomaticDisableChannelEnabled {
 		return false
 	}
@@ -156,57 +154,20 @@ func ShouldDisableChannel(channelType int, err *types.NewAPIError) bool {
 	if operation_setting.ShouldDisableByStatusCode(err.StatusCode) {
 		return true
 	}
-	//if err.StatusCode == http.StatusUnauthorized {
-	//	return true
-	//}
-	if err.StatusCode == http.StatusForbidden {
-		switch channelType {
-		case constant.ChannelTypeGemini:
-			return true
-		}
-	}
-	oaiErr := err.ToOpenAIError()
-	switch oaiErr.Code {
-	case "invalid_api_key":
-		return true
-	case "account_deactivated":
-		return true
-	case "billing_not_active":
-		return true
-	case "pre_consume_token_quota_failed":
-		return true
-	case "Arrearage":
-		return true
-	}
-	switch oaiErr.Type {
-	case "insufficient_quota":
-		return true
-	case "insufficient_user_quota":
-		return true
-	// https://docs.anthropic.com/claude/reference/errors
-	case "authentication_error":
-		return true
-	case "permission_error":
-		return true
-	case "forbidden":
-		return true
-	}
 
 	lowerMessage := strings.ToLower(err.Error())
 	search, _ := AcSearch(lowerMessage, operation_setting.AutomaticDisableKeywords, true)
 	return search
 }
 
-func ShouldEnableChannel(status int, shouldBanChannel bool) bool {
+func ShouldEnableChannel(newAPIError *types.NewAPIError, status int) bool {
 	if !common.AutomaticEnableChannelEnabled {
 		return false
 	}
-	if status != common.ChannelStatusAutoDisabled {
+	if newAPIError != nil {
 		return false
 	}
-	// Strategy A: allow re-enable for auto-disabled channels when the latest
-	// test does NOT hit a disable condition.
-	if shouldBanChannel {
+	if status != common.ChannelStatusAutoDisabled {
 		return false
 	}
 	return true

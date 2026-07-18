@@ -25,6 +25,23 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// applyUpstreamContentLength populates req.ContentLength when the upstream
+// body is wrapped in a BodyStorage (see relay/common/outbound_body.go).
+//
+// net/http.NewRequest only auto-detects ContentLength for *bytes.Reader,
+// *bytes.Buffer and *strings.Reader. When the body is a type-erased io.Reader
+// (which is the case for ReaderOnly(BodyStorage)), the Content-Length header
+// would otherwise be omitted, forcing chunked transfer encoding and breaking
+// some upstreams that require an explicit Content-Length.
+func applyUpstreamContentLength(req *http.Request, info *common.RelayInfo) {
+	if info == nil {
+		return
+	}
+	if info.UpstreamRequestBodySize > 0 && req.ContentLength <= 0 {
+		req.ContentLength = info.UpstreamRequestBodySize
+	}
+}
+
 func SetupApiRequestHeader(info *common.RelayInfo, c *gin.Context, req *http.Header) {
 	if info.RelayMode == constant.RelayModeAudioTranscription || info.RelayMode == constant.RelayModeAudioTranslation {
 		// multipart/form-data
@@ -40,7 +57,6 @@ func SetupApiRequestHeader(info *common.RelayInfo, c *gin.Context, req *http.Hea
 }
 
 const clientHeaderPlaceholderPrefix = "{client_header:"
-const traceParentForwardHeader = "traceparent"
 
 const (
 	headerPassthroughAllKey        = "*"
@@ -62,8 +78,9 @@ var passthroughSkipHeaderNamesLower = map[string]struct{}{
 	"cookie": {},
 
 	// Additional headers that should not be forwarded by name-matching passthrough rules.
-	"host":           {},
-	"content-length": {},
+	"host":            {},
+	"content-length":  {},
+	"accept-encoding": {},
 
 	// Do not passthrough credentials by wildcard/regex.
 	"authorization":  {},
@@ -100,6 +117,9 @@ func getHeaderPassthroughRegex(pattern string) (*regexp.Regexp, error) {
 	return compiled, nil
 }
 
+func IsHeaderPassthroughRuleKey(key string) bool {
+	return isHeaderPassthroughRuleKey(key)
+}
 func isHeaderPassthroughRuleKey(key string) bool {
 	key = strings.TrimSpace(key)
 	if key == "" {
@@ -169,12 +189,17 @@ func applyHeaderOverridePlaceholders(template string, c *gin.Context, apiKey str
 // Passthrough rules are applied first, then normal overrides are applied, so explicit overrides win.
 func processHeaderOverride(info *common.RelayInfo, c *gin.Context) (map[string]string, error) {
 	headerOverride := make(map[string]string)
+	if info == nil {
+		return headerOverride, nil
+	}
+
+	headerOverrideSource := common.GetEffectiveHeaderOverride(info)
 
 	passAll := false
 	var passthroughRegex []*regexp.Regexp
 	if !info.IsChannelTest {
-		for k := range info.HeadersOverride {
-			key := strings.TrimSpace(k)
+		for k := range headerOverrideSource {
+			key := strings.TrimSpace(strings.ToLower(k))
 			if key == "" {
 				continue
 			}
@@ -183,12 +208,11 @@ func processHeaderOverride(info *common.RelayInfo, c *gin.Context) (map[string]s
 				continue
 			}
 
-			lower := strings.ToLower(key)
 			var pattern string
 			switch {
-			case strings.HasPrefix(lower, headerPassthroughRegexPrefix):
+			case strings.HasPrefix(key, headerPassthroughRegexPrefix):
 				pattern = strings.TrimSpace(key[len(headerPassthroughRegexPrefix):])
-			case strings.HasPrefix(lower, headerPassthroughRegexPrefixV2):
+			case strings.HasPrefix(key, headerPassthroughRegexPrefixV2):
 				pattern = strings.TrimSpace(key[len(headerPassthroughRegexPrefixV2):])
 			default:
 				continue
@@ -229,15 +253,15 @@ func processHeaderOverride(info *common.RelayInfo, c *gin.Context) (map[string]s
 			if value == "" {
 				continue
 			}
-			headerOverride[name] = value
+			headerOverride[strings.ToLower(strings.TrimSpace(name))] = value
 		}
 	}
 
-	for k, v := range info.HeadersOverride {
+	for k, v := range headerOverrideSource {
 		if isHeaderPassthroughRuleKey(k) {
 			continue
 		}
-		key := strings.TrimSpace(k)
+		key := strings.TrimSpace(strings.ToLower(k))
 		if key == "" {
 			continue
 		}
@@ -263,6 +287,10 @@ func processHeaderOverride(info *common.RelayInfo, c *gin.Context) (map[string]s
 	return headerOverride, nil
 }
 
+func ResolveHeaderOverride(info *common.RelayInfo, c *gin.Context) (map[string]string, error) {
+	return processHeaderOverride(info, c)
+}
+
 func applyHeaderOverrideToRequest(req *http.Request, headerOverride map[string]string) {
 	if req == nil {
 		return
@@ -276,49 +304,22 @@ func applyHeaderOverrideToRequest(req *http.Request, headerOverride map[string]s
 	}
 }
 
-func applyTraceHeaders(c *gin.Context, headers http.Header) {
-	if c == nil || headers == nil {
-		return
-	}
-
-	requestID := strings.TrimSpace(c.GetString(common2.RequestIdKey))
-	if requestID != "" {
-		headers.Set(common2.RequestIdKey, requestID)
-	}
-
-	traceID := strings.TrimSpace(c.GetString(common2.TraceIdKey))
-	if traceID == "" && c.Request != nil {
-		traceID = strings.TrimSpace(c.Request.Header.Get(common2.TraceIdKey))
-	}
-	if traceID != "" {
-		headers.Set(common2.TraceIdKey, traceID)
-	}
-
-	if c.Request != nil {
-		if traceparent := strings.TrimSpace(c.Request.Header.Get(traceParentForwardHeader)); traceparent != "" {
-			headers.Set(traceParentForwardHeader, traceparent)
-		}
-	}
-}
-
 func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody io.Reader) (*http.Response, error) {
 	fullRequestURL, err := a.GetRequestURL(info)
 	if err != nil {
 		return nil, fmt.Errorf("get request url failed: %w", err)
 	}
-	if common2.DebugEnabled {
-		println("fullRequestURL:", fullRequestURL)
-	}
-	req, err := http.NewRequestWithContext(c.Request.Context(), c.Request.Method, fullRequestURL, requestBody)
+	logger.LogDebug(c, "fullRequestURL: %s", common.SanitizeURLForLog(fullRequestURL))
+	req, err := http.NewRequest(c.Request.Method, fullRequestURL, requestBody)
 	if err != nil {
 		return nil, fmt.Errorf("new request failed: %w", err)
 	}
+	applyUpstreamContentLength(req, info)
 	headers := req.Header
 	err = a.SetupRequestHeader(c, &headers, info)
 	if err != nil {
 		return nil, fmt.Errorf("setup request header failed: %w", err)
 	}
-	applyTraceHeaders(c, req.Header)
 	// 在 SetupRequestHeader 之后应用 Header Override，确保用户设置优先级最高
 	// 这样可以覆盖默认的 Authorization header 设置
 	headerOverride, err := processHeaderOverride(info, c)
@@ -338,13 +339,12 @@ func DoFormRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBod
 	if err != nil {
 		return nil, fmt.Errorf("get request url failed: %w", err)
 	}
-	if common2.DebugEnabled {
-		println("fullRequestURL:", fullRequestURL)
-	}
-	req, err := http.NewRequestWithContext(c.Request.Context(), c.Request.Method, fullRequestURL, requestBody)
+	logger.LogDebug(c, "fullRequestURL: %s", common.SanitizeURLForLog(fullRequestURL))
+	req, err := http.NewRequest(c.Request.Method, fullRequestURL, requestBody)
 	if err != nil {
 		return nil, fmt.Errorf("new request failed: %w", err)
 	}
+	applyUpstreamContentLength(req, info)
 	// set form data
 	req.Header.Set("Content-Type", c.Request.Header.Get("Content-Type"))
 	headers := req.Header
@@ -352,7 +352,6 @@ func DoFormRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBod
 	if err != nil {
 		return nil, fmt.Errorf("setup request header failed: %w", err)
 	}
-	applyTraceHeaders(c, req.Header)
 	// 在 SetupRequestHeader 之后应用 Header Override，确保用户设置优先级最高
 	// 这样可以覆盖默认的 Authorization header 设置
 	headerOverride, err := processHeaderOverride(info, c)
@@ -377,7 +376,6 @@ func DoWssRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 	if err != nil {
 		return nil, fmt.Errorf("setup request header failed: %w", err)
 	}
-	applyTraceHeaders(c, targetHeader)
 	// 在 SetupRequestHeader 之后应用 Header Override，确保用户设置优先级最高
 	// 这样可以覆盖默认的 Authorization header 设置
 	headerOverride, err := processHeaderOverride(info, c)
@@ -388,9 +386,9 @@ func DoWssRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 		targetHeader.Set(key, value)
 	}
 	targetHeader.Set("Content-Type", c.Request.Header.Get("Content-Type"))
-	targetConn, _, err := websocket.DefaultDialer.DialContext(c.Request.Context(), fullRequestURL, targetHeader)
+	targetConn, _, err := websocket.DefaultDialer.Dial(fullRequestURL, targetHeader)
 	if err != nil {
-		return nil, fmt.Errorf("dial failed to %s: %w", fullRequestURL, err)
+		return nil, fmt.Errorf("dial failed to %s: %w", common.SanitizeURLForLog(fullRequestURL), err)
 	}
 	// send request body
 	//all, err := io.ReadAll(requestBody)
@@ -398,20 +396,18 @@ func DoWssRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 	return targetConn, nil
 }
 
-func startPingKeepAlive(c *gin.Context, pingInterval time.Duration) context.CancelFunc {
+func startPingKeepAlive(c *gin.Context, pingInterval time.Duration) (context.CancelFunc, <-chan struct{}) {
 	pingerCtx, stopPinger := context.WithCancel(context.Background())
+	done := make(chan struct{})
 
 	gopool.Go(func() {
+		defer close(done)
 		defer func() {
 			// 增加panic恢复处理
 			if r := recover(); r != nil {
-				if common2.DebugEnabled {
-					println("SSE ping goroutine panic recovered:", fmt.Sprintf("%v", r))
-				}
+				logger.LogDebug(c, "SSE ping goroutine panic recovered: %v", r)
 			}
-			if common2.DebugEnabled {
-				println("SSE ping goroutine stopped.")
-			}
+			logger.LogDebug(c, "SSE ping goroutine stopped")
 		}()
 
 		if pingInterval <= 0 {
@@ -422,15 +418,11 @@ func startPingKeepAlive(c *gin.Context, pingInterval time.Duration) context.Canc
 		// 确保在任何情况下都清理ticker
 		defer func() {
 			ticker.Stop()
-			if common2.DebugEnabled {
-				println("SSE ping ticker stopped")
-			}
+			logger.LogDebug(c, "SSE ping ticker stopped")
 		}()
 
 		var pingMutex sync.Mutex
-		if common2.DebugEnabled {
-			println("SSE ping goroutine started")
-		}
+		logger.LogDebug(c, "SSE ping goroutine started")
 
 		// 增加超时控制，防止goroutine长时间运行
 		maxPingDuration := 120 * time.Minute // 最大ping持续时间
@@ -442,9 +434,7 @@ func startPingKeepAlive(c *gin.Context, pingInterval time.Duration) context.Canc
 			// 发送 ping 数据
 			case <-ticker.C:
 				if err := sendPingData(c, &pingMutex); err != nil {
-					if common2.DebugEnabled {
-						println("SSE ping error, stopping goroutine:", err.Error())
-					}
+					logger.LogDebug(c, "SSE ping error, stopping goroutine: %s", err.Error())
 					return
 				}
 			// 收到退出信号
@@ -455,46 +445,30 @@ func startPingKeepAlive(c *gin.Context, pingInterval time.Duration) context.Canc
 				return
 			// 超时保护，防止goroutine无限运行
 			case <-pingTimeout.C:
-				if common2.DebugEnabled {
-					println("SSE ping goroutine timeout, stopping")
-				}
+				logger.LogDebug(c, "SSE ping goroutine timeout, stopping")
 				return
 			}
 		}
 	})
 
-	return stopPinger
+	return stopPinger, done
 }
 
 func sendPingData(c *gin.Context, mutex *sync.Mutex) error {
-	// 增加超时控制，防止锁死等待
-	done := make(chan error, 1)
-	go func() {
-		mutex.Lock()
-		defer mutex.Unlock()
+	mutex.Lock()
+	defer mutex.Unlock()
 
-		err := helper.PingData(c)
-		if err != nil {
-			logger.LogError(c, "SSE ping error: "+err.Error())
-			done <- err
-			return
-		}
-
-		if common2.DebugEnabled {
-			println("SSE ping data sent.")
-		}
-		done <- nil
-	}()
-
-	// 设置发送ping数据的超时时间
-	select {
-	case err := <-done:
+	// Bound the write so a slow client cannot block this goroutine forever;
+	// doRequest's defer waits for the pinger to exit before returning.
+	helper.ExtendWriteDeadline(c)
+	err := helper.PingData(c)
+	if err != nil {
+		logger.LogError(c, "SSE ping error: "+err.Error())
 		return err
-	case <-time.After(10 * time.Second):
-		return errors.New("SSE ping data send timeout")
-	case <-c.Request.Context().Done():
-		return errors.New("request context cancelled during ping")
 	}
+
+	logger.LogDebug(c, "SSE ping data sent")
+	return nil
 }
 
 func DoRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http.Response, error) {
@@ -513,20 +487,20 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 	}
 
 	var stopPinger context.CancelFunc
+	var pingerDone <-chan struct{}
 	if info.IsStream {
 		helper.SetEventStreamHeaders(c)
 		// 处理流式请求的 ping 保活
 		generalSettings := operation_setting.GetGeneralSetting()
 		if generalSettings.PingIntervalEnabled && !info.DisablePing {
 			pingInterval := time.Duration(generalSettings.PingIntervalSeconds) * time.Second
-			stopPinger = startPingKeepAlive(c, pingInterval)
+			stopPinger, pingerDone = startPingKeepAlive(c, pingInterval)
 			// 使用defer确保在任何情况下都能停止ping goroutine
 			defer func() {
 				if stopPinger != nil {
 					stopPinger()
-					if common2.DebugEnabled {
-						println("SSE ping goroutine stopped by defer")
-					}
+					<-pingerDone
+					logger.LogDebug(c, "SSE ping goroutine stopped by defer")
 				}
 			}()
 		}
@@ -541,6 +515,10 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 		return nil, errors.New("resp is nil")
 	}
 
+	if upID := resp.Header.Get(common2.RequestIdKey); upID != "" {
+		c.Set(common2.UpstreamRequestIdKey, upID)
+	}
+
 	_ = req.Body.Close()
 	_ = c.Request.Body.Close()
 	return resp, nil
@@ -551,10 +529,11 @@ func DoTaskApiRequest(a TaskAdaptor, c *gin.Context, info *common.RelayInfo, req
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(c.Request.Context(), c.Request.Method, fullRequestURL, requestBody)
+	req, err := http.NewRequest(c.Request.Method, fullRequestURL, requestBody)
 	if err != nil {
 		return nil, fmt.Errorf("new request failed: %w", err)
 	}
+	applyUpstreamContentLength(req, info)
 	req.GetBody = func() (io.ReadCloser, error) {
 		return io.NopCloser(requestBody), nil
 	}

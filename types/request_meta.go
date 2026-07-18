@@ -26,19 +26,19 @@ type TokenCountMeta struct {
 	Files         []*FileMeta `json:"files,omitempty"`          // List of files, each with type and content
 	MaxTokens     int         `json:"max_tokens,omitempty"`     // Maximum tokens allowed in the request
 
-	ImagePriceRatio float64 `json:"image_ratio,omitempty"` // Ratio for image size, if applicable
+	ImagePriceRatio float64            `json:"image_ratio,omitempty"`    // Ratio for image size, if applicable
+	BillingRatios   map[string]float64 `json:"billing_ratios,omitempty"` // Validated request multipliers used by pre-consume billing
 	//IsStreaming   bool        `json:"is_streaming,omitempty"`   // Indicates if the request is streaming
 }
 
 type FileMeta struct {
 	FileType
-	MimeType string
-	Source   *FileSource // 统一的文件来源（URL 或 base64）
-	Detail   string      // 图片细节级别（low/high/auto）
+	Source FileSource // 统一的文件来源（URL 或 base64）
+	Detail string     // 图片细节级别（low/high/auto）
 }
 
 // NewFileMeta 创建新的 FileMeta
-func NewFileMeta(fileType FileType, source *FileSource) *FileMeta {
+func NewFileMeta(fileType FileType, source FileSource) *FileMeta {
 	return &FileMeta{
 		FileType: fileType,
 		Source:   source,
@@ -46,7 +46,7 @@ func NewFileMeta(fileType FileType, source *FileSource) *FileMeta {
 }
 
 // NewImageFileMeta 创建图片类型的 FileMeta
-func NewImageFileMeta(source *FileSource, detail string) *FileMeta {
+func NewImageFileMeta(source FileSource, detail string) *FileMeta {
 	return &FileMeta{
 		FileType: FileTypeImage,
 		Source:   source,

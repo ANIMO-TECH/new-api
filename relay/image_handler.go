@@ -25,25 +25,21 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 
 	imageReq, ok := info.Request.(*dto.ImageRequest)
 	if !ok {
-		logger.LogError(c, fmt.Sprintf("image relay got invalid request type: %T", info.Request))
 		return types.NewErrorWithStatusCode(fmt.Errorf("invalid request type, expected dto.ImageRequest, got %T", info.Request), types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 	}
 
 	request, err := common.DeepCopy(imageReq)
 	if err != nil {
-		logger.LogError(c, fmt.Sprintf("image relay deep copy failed, model=%s: %s", imageReq.Model, err.Error()))
 		return types.NewError(fmt.Errorf("failed to copy request to ImageRequest: %w", err), types.ErrorCodeInvalidRequest, types.ErrOptionWithSkipRetry())
 	}
 
 	err = helper.ModelMappedHelper(c, info, request)
 	if err != nil {
-		logger.LogError(c, fmt.Sprintf("image relay model mapping failed, model=%s: %s", request.Model, err.Error()))
 		return types.NewError(err, types.ErrorCodeChannelModelMappedError, types.ErrOptionWithSkipRetry())
 	}
 
 	adaptor := GetAdaptor(info.ApiType)
 	if adaptor == nil {
-		logger.LogError(c, fmt.Sprintf("image relay adaptor missing, api_type=%d, model=%s", info.ApiType, request.Model))
 		return types.NewError(fmt.Errorf("invalid api type: %d", info.ApiType), types.ErrorCodeInvalidApiType, types.ErrOptionWithSkipRetry())
 	}
 	adaptor.Init(info)
@@ -53,15 +49,12 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 	if model_setting.GetGlobalSettings().PassThroughRequestEnabled || info.ChannelSetting.PassThroughBodyEnabled {
 		storage, err := common.GetBodyStorage(c)
 		if err != nil {
-			logger.LogError(c, fmt.Sprintf("image relay read passthrough body failed, model=%s: %s", request.Model, err.Error()))
 			return types.NewErrorWithStatusCode(err, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 		}
 		requestBody = common.ReaderOnly(storage)
 	} else {
 		convertedRequest, err := adaptor.ConvertImageRequest(c, info, *request)
 		if err != nil {
-			logger.LogError(c, fmt.Sprintf("image relay convert request failed, model=%s, size=%s, quality=%s, n=%d: %s",
-				request.Model, request.Size, request.Quality, request.N, err.Error()))
 			return types.NewError(err, types.ErrorCodeConvertRequestFailed)
 		}
 		relaycommon.AppendRequestConversionFromRequest(info, convertedRequest)
@@ -72,23 +65,26 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 		default:
 			jsonData, err := common.Marshal(convertedRequest)
 			if err != nil {
-				logger.LogError(c, fmt.Sprintf("image relay marshal converted request failed, model=%s: %s", request.Model, err.Error()))
 				return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 			}
 
 			// apply param override
 			if len(info.ParamOverride) > 0 {
-				jsonData, err = relaycommon.ApplyParamOverride(jsonData, info.ParamOverride, relaycommon.BuildParamOverrideContext(info))
+				jsonData, err = relaycommon.ApplyParamOverrideWithRelayInfo(jsonData, info)
 				if err != nil {
-					logger.LogError(c, fmt.Sprintf("image relay apply param override failed, model=%s: %s", request.Model, err.Error()))
-					return types.NewError(err, types.ErrorCodeChannelParamOverrideInvalid, types.ErrOptionWithSkipRetry())
+					return newAPIErrorFromParamOverride(err)
 				}
 			}
 
-			if common.DebugEnabled {
-				logger.LogDebug(c, fmt.Sprintf("image request body: %s", string(jsonData)))
+			logger.LogDebug(c, "image request body: %s", jsonData)
+			body, size, closer, err := relaycommon.NewOutboundJSONBody(jsonData)
+			if err != nil {
+				return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 			}
-			requestBody = bytes.NewBuffer(jsonData)
+			defer closer.Close()
+			jsonData = nil
+			info.UpstreamRequestBodySize = size
+			requestBody = body
 		}
 	}
 
@@ -96,8 +92,6 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 
 	resp, err := adaptor.DoRequest(c, info, requestBody)
 	if err != nil {
-		logger.LogError(c, fmt.Sprintf("image relay upstream request failed, model=%s, channel_id=%d: %s",
-			request.Model, info.ChannelId, err.Error()))
 		return types.NewOpenAIError(err, types.ErrorCodeDoRequestFailed, http.StatusInternalServerError)
 	}
 	var httpResp *http.Response
@@ -109,8 +103,6 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 				// replicate channel returns 201 Created when using Prefer: wait, treat it as success.
 				httpResp.StatusCode = http.StatusOK
 			} else {
-				logger.LogWarn(c, fmt.Sprintf("image relay upstream returned non-OK status, model=%s, channel_id=%d, status=%d",
-					request.Model, info.ChannelId, httpResp.StatusCode))
 				newAPIError = service.RelayErrorHandler(c.Request.Context(), httpResp, false)
 				// reset status code 重置状态码
 				service.ResetStatusCode(newAPIError, statusCodeMappingStr)
@@ -121,23 +113,26 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 
 	usage, newAPIError := adaptor.DoResponse(c, httpResp, info)
 	if newAPIError != nil {
-		logger.LogError(c, fmt.Sprintf("image relay response handling failed, model=%s, channel_id=%d: %s",
-			request.Model, info.ChannelId, newAPIError.Error()))
 		// reset status code 重置状态码
 		service.ResetStatusCode(newAPIError, statusCodeMappingStr)
 		return newAPIError
 	}
 
-	if usage.(*dto.Usage).TotalTokens == 0 {
-		usage.(*dto.Usage).TotalTokens = int(request.N)
-	}
-	if usage.(*dto.Usage).PromptTokens == 0 {
-		usage.(*dto.Usage).PromptTokens = int(request.N)
+	imageN := uint(1)
+	if request.N != nil {
+		imageN = *request.N
 	}
 
-	quality := "standard"
-	if request.Quality == "hd" {
-		quality = "hd"
+	if usage.(*dto.Usage).TotalTokens == 0 {
+		usage.(*dto.Usage).TotalTokens = 1
+	}
+	if usage.(*dto.Usage).PromptTokens == 0 {
+		usage.(*dto.Usage).PromptTokens = 1
+	}
+
+	quality := request.Quality
+	if quality == "" {
+		quality = "standard"
 	}
 
 	var logContent []string
@@ -148,10 +143,10 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 	if len(quality) > 0 {
 		logContent = append(logContent, fmt.Sprintf("品质 %s", quality))
 	}
-	if request.N > 0 {
-		logContent = append(logContent, fmt.Sprintf("生成数量 %d", request.N))
+	if imageN > 0 {
+		logContent = append(logContent, fmt.Sprintf("生成数量 %d", imageN))
 	}
 
-	postConsumeQuota(c, info, usage.(*dto.Usage), logContent...)
+	service.PostTextConsumeQuota(c, info, usage.(*dto.Usage), logContent)
 	return nil
 }

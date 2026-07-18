@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/types"
 )
 
@@ -220,10 +221,13 @@ type CompletionsStreamResponse struct {
 }
 
 type Usage struct {
-	PromptTokens         int `json:"prompt_tokens"`
-	CompletionTokens     int `json:"completion_tokens"`
-	TotalTokens          int `json:"total_tokens"`
-	PromptCacheHitTokens int `json:"prompt_cache_hit_tokens,omitempty"`
+	PromptTokens         int           `json:"prompt_tokens"`
+	CompletionTokens     int           `json:"completion_tokens"`
+	TotalTokens          int           `json:"total_tokens"`
+	PromptCacheHitTokens int           `json:"prompt_cache_hit_tokens,omitempty"`
+	UsageSemantic        string        `json:"usage_semantic,omitempty"`
+	UsageSource          string        `json:"usage_source,omitempty"`
+	BillingUsage         *BillingUsage `json:"billing_usage,omitempty"`
 
 	PromptTokensDetails    InputTokenDetails  `json:"prompt_tokens_details"`
 	CompletionTokenDetails OutputTokenDetails `json:"completion_tokens_details"`
@@ -251,15 +255,38 @@ type OpenAIVideoResponse struct {
 
 type InputTokenDetails struct {
 	CachedTokens         int `json:"cached_tokens"`
-	CachedCreationTokens int `json:"-"`
-	TextTokens           int `json:"text_tokens"`
-	AudioTokens          int `json:"audio_tokens"`
-	ImageTokens          int `json:"image_tokens"`
+	CachedCreationTokens int `json:"cached_creation_tokens,omitempty"`
+	// CacheWriteTokens is OpenAI's native cache-write count, reported as
+	// prompt_tokens_details.cache_write_tokens (Chat Completions) or
+	// input_tokens_details.cache_write_tokens (Responses). It is billed at the
+	// cache-creation price.
+	CacheWriteTokens int `json:"cache_write_tokens,omitempty"`
+	TextTokens       int `json:"text_tokens"`
+	AudioTokens      int `json:"audio_tokens"`
+	ImageTokens      int `json:"image_tokens"`
+}
+
+// CacheCreationTokensTotal returns the cache-write token count regardless of
+// which field the upstream reported it in: Claude-derived conversions populate
+// CachedCreationTokens while OpenAI reports cache_write_tokens natively. Both
+// are billed at the cache-creation price; when both are present the larger
+// value wins so the same tokens are never double-counted. Negative upstream
+// values are clamped to zero so they can never lower a charge.
+func (d InputTokenDetails) CacheCreationTokensTotal() int {
+	total := d.CachedCreationTokens
+	if d.CacheWriteTokens > total {
+		total = d.CacheWriteTokens
+	}
+	if total < 0 {
+		return 0
+	}
+	return total
 }
 
 type OutputTokenDetails struct {
 	TextTokens      int `json:"text_tokens"`
 	AudioTokens     int `json:"audio_tokens"`
+	ImageTokens     int `json:"image_tokens"`
 	ReasoningTokens int `json:"reasoning_tokens"`
 }
 
@@ -267,22 +294,22 @@ type OpenAIResponsesResponse struct {
 	ID                 string             `json:"id"`
 	Object             string             `json:"object"`
 	CreatedAt          int                `json:"created_at"`
-	Status             string             `json:"status"`
+	Status             json.RawMessage    `json:"status"`
 	Error              any                `json:"error,omitempty"`
 	IncompleteDetails  *IncompleteDetails `json:"incomplete_details,omitempty"`
-	Instructions       string             `json:"instructions"`
+	Instructions       json.RawMessage    `json:"instructions"`
 	MaxOutputTokens    int                `json:"max_output_tokens"`
 	Model              string             `json:"model"`
 	Output             []ResponsesOutput  `json:"output"`
 	ParallelToolCalls  bool               `json:"parallel_tool_calls"`
-	PreviousResponseID string             `json:"previous_response_id"`
+	PreviousResponseID json.RawMessage    `json:"previous_response_id"`
 	Reasoning          *Reasoning         `json:"reasoning"`
 	Store              bool               `json:"store"`
 	Temperature        float64            `json:"temperature"`
-	ToolChoice         string             `json:"tool_choice"`
+	ToolChoice         json.RawMessage    `json:"tool_choice"`
 	Tools              []map[string]any   `json:"tools"`
 	TopP               float64            `json:"top_p"`
-	Truncation         string             `json:"truncation"`
+	Truncation         json.RawMessage    `json:"truncation"`
 	Usage              *Usage             `json:"usage"`
 	User               json.RawMessage    `json:"user"`
 	Metadata           json.RawMessage    `json:"metadata"`
@@ -330,7 +357,7 @@ func (o *OpenAIResponsesResponse) GetSize() string {
 }
 
 type IncompleteDetails struct {
-	Reasoning string `json:"reasoning"`
+	Reason string `json:"reason"`
 }
 
 type ResponsesOutput struct {
@@ -343,7 +370,20 @@ type ResponsesOutput struct {
 	Size      string                   `json:"size"`
 	CallId    string                   `json:"call_id,omitempty"`
 	Name      string                   `json:"name,omitempty"`
-	Arguments string                   `json:"arguments,omitempty"`
+	Arguments json.RawMessage          `json:"arguments,omitempty"`
+}
+
+// ArgumentsString returns function call arguments in the string form expected by Chat Completions.
+func (r *ResponsesOutput) ArgumentsString() string {
+	if r == nil {
+		return ""
+	}
+	return ResponsesArgumentsString(r.Arguments)
+}
+
+// ResponsesArgumentsString returns function call arguments in the string form expected by Chat Completions.
+func ResponsesArgumentsString(arguments json.RawMessage) string {
+	return common.JsonRawMessageToString(arguments)
 }
 
 type ResponsesOutputContent struct {

@@ -7,6 +7,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/types"
+	"github.com/samber/lo"
 
 	"github.com/gin-gonic/gin"
 )
@@ -31,41 +32,45 @@ type GeneralOpenAIRequest struct {
 	Prompt              any               `json:"prompt,omitempty"`
 	Prefix              any               `json:"prefix,omitempty"`
 	Suffix              any               `json:"suffix,omitempty"`
-	Stream              bool              `json:"stream,omitempty"`
+	Stream              *bool             `json:"stream,omitempty"`
 	StreamOptions       *StreamOptions    `json:"stream_options,omitempty"`
-	MaxTokens           uint              `json:"max_tokens,omitempty"`
-	MaxCompletionTokens uint              `json:"max_completion_tokens,omitempty"`
+	MaxTokens           *uint             `json:"max_tokens,omitempty"`
+	MaxCompletionTokens *uint             `json:"max_completion_tokens,omitempty"`
 	ReasoningEffort     string            `json:"reasoning_effort,omitempty"`
 	Verbosity           json.RawMessage   `json:"verbosity,omitempty"` // gpt-5
 	Temperature         *float64          `json:"temperature,omitempty"`
-	TopP                float64           `json:"top_p,omitempty"`
-	TopK                int               `json:"top_k,omitempty"`
+	TopP                *float64          `json:"top_p,omitempty"`
+	TopK                *int              `json:"top_k,omitempty"`
 	Stop                any               `json:"stop,omitempty"`
-	N                   int               `json:"n,omitempty"`
+	N                   *int              `json:"n,omitempty"`
 	Input               any               `json:"input,omitempty"`
 	Instruction         string            `json:"instruction,omitempty"`
 	Size                string            `json:"size,omitempty"`
 	Functions           json.RawMessage   `json:"functions,omitempty"`
-	FrequencyPenalty    float64           `json:"frequency_penalty,omitempty"`
-	PresencePenalty     float64           `json:"presence_penalty,omitempty"`
+	FrequencyPenalty    *float64          `json:"frequency_penalty,omitempty"`
+	PresencePenalty     *float64          `json:"presence_penalty,omitempty"`
 	ResponseFormat      *ResponseFormat   `json:"response_format,omitempty"`
 	EncodingFormat      json.RawMessage   `json:"encoding_format,omitempty"`
-	Seed                float64           `json:"seed,omitempty"`
+	Seed                *float64          `json:"seed,omitempty"`
 	ParallelTooCalls    *bool             `json:"parallel_tool_calls,omitempty"`
 	Tools               []ToolCallRequest `json:"tools,omitempty"`
 	ToolChoice          any               `json:"tool_choice,omitempty"`
-	User                string            `json:"user,omitempty"`
-	LogProbs            bool              `json:"logprobs,omitempty"`
-	TopLogProbs         int               `json:"top_logprobs,omitempty"`
-	Dimensions          int               `json:"dimensions,omitempty"`
-	Modalities          json.RawMessage   `json:"modalities,omitempty"`
-	Audio               json.RawMessage   `json:"audio,omitempty"`
+	FunctionCall        json.RawMessage   `json:"function_call,omitempty"`
+	User                json.RawMessage   `json:"user,omitempty"`
+	// ServiceTier specifies upstream service level and may affect billing.
+	// This field is filtered by default and can be enabled via channel setting allow_service_tier.
+	ServiceTier json.RawMessage `json:"service_tier,omitempty"`
+	LogProbs    *bool           `json:"logprobs,omitempty"`
+	TopLogProbs *int            `json:"top_logprobs,omitempty"`
+	Dimensions  *int            `json:"dimensions,omitempty"`
+	Modalities  json.RawMessage `json:"modalities,omitempty"`
+	Audio       json.RawMessage `json:"audio,omitempty"`
 	// 安全标识符，用于帮助 OpenAI 检测可能违反使用政策的应用程序用户
-	// 注意：此字段会向 OpenAI 发送用户标识信息，默认过滤以保护用户隐私
-	SafetyIdentifier string `json:"safety_identifier,omitempty"`
+	// 注意：此字段会向 OpenAI 发送用户标识信息，默认过滤，可通过 allow_safety_identifier 开启
+	SafetyIdentifier json.RawMessage `json:"safety_identifier,omitempty"`
 	// Whether or not to store the output of this chat completion request for use in our model distillation or evals products.
 	// 是否存储此次请求数据供 OpenAI 用于评估和优化产品
-	// 注意：默认过滤此字段以保护用户隐私，但过滤后可能导致 Codex 无法正常使用
+	// 注意：默认允许透传，可通过 disable_store 禁用；禁用后可能导致 Codex 无法正常使用
 	Store json.RawMessage `json:"store,omitempty"`
 	// Used by OpenAI to cache responses for similar requests to optimize your cache hit rates. Replaces the user field
 	PromptCacheKey       string          `json:"prompt_cache_key,omitempty"`
@@ -95,18 +100,12 @@ type GeneralOpenAIRequest struct {
 	THINKING json.RawMessage `json:"thinking,omitempty"`
 	// pplx Params
 	SearchDomainFilter     json.RawMessage `json:"search_domain_filter,omitempty"`
-	SearchRecencyFilter    string          `json:"search_recency_filter,omitempty"`
-	ReturnImages           bool            `json:"return_images,omitempty"`
-	ReturnRelatedQuestions bool            `json:"return_related_questions,omitempty"`
-	SearchMode             string          `json:"search_mode,omitempty"`
-}
-
-// createFileSource 根据数据内容创建正确类型的 FileSource
-func createFileSource(data string) *types.FileSource {
-	if strings.HasPrefix(data, "http://") || strings.HasPrefix(data, "https://") {
-		return types.NewURLFileSource(data)
-	}
-	return types.NewBase64FileSource(data, "")
+	SearchRecencyFilter    json.RawMessage `json:"search_recency_filter,omitempty"`
+	ReturnImages           *bool           `json:"return_images,omitempty"`
+	ReturnRelatedQuestions *bool           `json:"return_related_questions,omitempty"`
+	SearchMode             json.RawMessage `json:"search_mode,omitempty"`
+	// Minimax
+	ReasoningSplit json.RawMessage `json:"reasoning_split,omitempty"`
 }
 
 func (r *GeneralOpenAIRequest) GetTokenCountMeta() *types.TokenCountMeta {
@@ -134,10 +133,12 @@ func (r *GeneralOpenAIRequest) GetTokenCountMeta() *types.TokenCountMeta {
 		texts = append(texts, inputs...)
 	}
 
-	if r.MaxCompletionTokens > r.MaxTokens {
-		tokenCountMeta.MaxTokens = int(r.MaxCompletionTokens)
+	maxTokens := lo.FromPtrOr(r.MaxTokens, uint(0))
+	maxCompletionTokens := lo.FromPtrOr(r.MaxCompletionTokens, uint(0))
+	if maxCompletionTokens > maxTokens {
+		tokenCountMeta.MaxTokens = int(maxCompletionTokens)
 	} else {
-		tokenCountMeta.MaxTokens = int(r.MaxTokens)
+		tokenCountMeta.MaxTokens = int(maxTokens)
 	}
 
 	for _, message := range r.Messages {
@@ -150,44 +151,24 @@ func (r *GeneralOpenAIRequest) GetTokenCountMeta() *types.TokenCountMeta {
 			}
 			arrayContent := message.ParseContent()
 			for _, m := range arrayContent {
-				if m.Type == ContentTypeImageURL {
-					imageUrl := m.GetImageMedia()
-					if imageUrl != nil && imageUrl.Url != "" {
-						source := createFileSource(imageUrl.Url)
-						fileMeta = append(fileMeta, &types.FileMeta{
-							FileType: types.FileTypeImage,
-							Source:   source,
-							Detail:   imageUrl.Detail,
-						})
+				source := m.ToFileSource()
+				if source != nil {
+					meta := &types.FileMeta{Source: source}
+					switch m.Type {
+					case ContentTypeImageURL:
+						meta.FileType = types.FileTypeImage
+						if img := m.GetImageMedia(); img != nil {
+							meta.Detail = img.Detail
+						}
+					case ContentTypeInputAudio:
+						meta.FileType = types.FileTypeAudio
+					case ContentTypeFile:
+						meta.FileType = types.FileTypeFile
+					case ContentTypeVideoUrl:
+						meta.FileType = types.FileTypeVideo
 					}
-				} else if m.Type == ContentTypeInputAudio {
-					inputAudio := m.GetInputAudio()
-					if inputAudio != nil && inputAudio.Data != "" {
-						source := createFileSource(inputAudio.Data)
-						fileMeta = append(fileMeta, &types.FileMeta{
-							FileType: types.FileTypeAudio,
-							Source:   source,
-						})
-					}
-				} else if m.Type == ContentTypeFile {
-					file := m.GetFile()
-					if file != nil && file.FileData != "" {
-						source := createFileSource(file.FileData)
-						fileMeta = append(fileMeta, &types.FileMeta{
-							FileType: types.FileTypeFile,
-							Source:   source,
-						})
-					}
-				} else if m.Type == ContentTypeVideoUrl {
-					videoUrl := m.GetVideoUrl()
-					if videoUrl != nil && videoUrl.Url != "" {
-						source := createFileSource(videoUrl.Url)
-						fileMeta = append(fileMeta, &types.FileMeta{
-							FileType: types.FileTypeVideo,
-							Source:   source,
-						})
-					}
-				} else {
+					fileMeta = append(fileMeta, meta)
+				} else if m.Type == ContentTypeText {
 					texts = append(texts, m.Text)
 				}
 			}
@@ -216,7 +197,7 @@ func (r *GeneralOpenAIRequest) GetTokenCountMeta() *types.TokenCountMeta {
 }
 
 func (r *GeneralOpenAIRequest) IsStream(c *gin.Context) bool {
-	return r.Stream
+	return lo.FromPtrOr(r.Stream, false)
 }
 
 func (r *GeneralOpenAIRequest) SetModelName(modelName string) {
@@ -232,12 +213,22 @@ func (r *GeneralOpenAIRequest) ToMap() map[string]any {
 	return result
 }
 
+func IsOpenAIReasoningOModel(modelName string) bool {
+	return strings.HasPrefix(modelName, "o1") ||
+		strings.HasPrefix(modelName, "o3") ||
+		strings.HasPrefix(modelName, "o4")
+}
+
+func IsOpenAIGPT5Model(modelName string) bool {
+	return strings.HasPrefix(modelName, "gpt-5")
+}
+
 func (r *GeneralOpenAIRequest) GetSystemRoleName() string {
-	if strings.HasPrefix(r.Model, "o") {
+	if IsOpenAIReasoningOModel(r.Model) {
 		if !strings.HasPrefix(r.Model, "o1-mini") && !strings.HasPrefix(r.Model, "o1-preview") {
 			return "developer"
 		}
-	} else if strings.HasPrefix(r.Model, "gpt-5") {
+	} else if IsOpenAIGPT5Model(r.Model) {
 		return "developer"
 	}
 	return "system"
@@ -261,13 +252,17 @@ type FunctionRequest struct {
 
 type StreamOptions struct {
 	IncludeUsage bool `json:"include_usage,omitempty"`
+	// IncludeObfuscation is only for /v1/responses stream payload.
+	// This field is filtered by default and can be enabled via channel setting allow_include_obfuscation.
+	IncludeObfuscation bool `json:"include_obfuscation,omitempty"`
 }
 
 func (r *GeneralOpenAIRequest) GetMaxTokens() uint {
-	if r.MaxCompletionTokens != 0 {
-		return r.MaxCompletionTokens
+	maxCompletionTokens := lo.FromPtrOr(r.MaxCompletionTokens, uint(0))
+	if maxCompletionTokens != 0 {
+		return maxCompletionTokens
 	}
-	return r.MaxTokens
+	return lo.FromPtrOr(r.MaxTokens, uint(0))
 }
 
 func (r *GeneralOpenAIRequest) ParseInput() []string {
@@ -295,8 +290,8 @@ type Message struct {
 	Images           any             `json:"images,omitempty"`
 	Name             *string         `json:"name,omitempty"`
 	Prefix           *bool           `json:"prefix,omitempty"`
-	ReasoningContent string          `json:"reasoning_content,omitempty"`
-	Reasoning        string          `json:"reasoning,omitempty"`
+	ReasoningContent *string         `json:"reasoning_content,omitempty"`
+	Reasoning        *string         `json:"reasoning,omitempty"`
 	ToolCalls        json.RawMessage `json:"tool_calls,omitempty"`
 	ToolCallId       string          `json:"tool_call_id,omitempty"`
 	parsedContent    []MediaContent
@@ -379,9 +374,43 @@ func (m *MediaContent) GetVideoUrl() *MessageVideoUrl {
 	return nil
 }
 
+func (m *MediaContent) ToFileSource() types.FileSource {
+	switch m.Type {
+	case ContentTypeImageURL:
+		img := m.GetImageMedia()
+		if img == nil || img.Url == "" {
+			return nil
+		}
+		return types.NewFileSourceFromData(img.Url, img.MimeType)
+	case ContentTypeInputAudio:
+		audio := m.GetInputAudio()
+		if audio == nil || audio.Data == "" {
+			return nil
+		}
+		mimeType := ""
+		if audio.Format != "" {
+			mimeType = "audio/" + audio.Format
+		}
+		return types.NewFileSourceFromData(audio.Data, mimeType)
+	case ContentTypeFile:
+		file := m.GetFile()
+		if file == nil || file.FileData == "" {
+			return nil
+		}
+		return types.NewFileSourceFromData(file.FileData, "")
+	case ContentTypeVideoUrl:
+		video := m.GetVideoUrl()
+		if video == nil || video.Url == "" {
+			return nil
+		}
+		return types.NewFileSourceFromData(video.Url, "")
+	}
+	return nil
+}
+
 type MessageImageUrl struct {
 	Url      string `json:"url"`
-	Detail   string `json:"detail"`
+	Detail   string `json:"detail,omitempty"`
 	MimeType string
 }
 
@@ -412,6 +441,16 @@ const (
 	ContentTypeVideoUrl   = "video_url" // 阿里百炼视频识别
 	//ContentTypeAudioUrl   = "audio_url"
 )
+
+func (m *Message) GetReasoningContent() string {
+	if m.ReasoningContent == nil && m.Reasoning == nil {
+		return ""
+	}
+	if m.ReasoningContent != nil {
+		return *m.ReasoningContent
+	}
+	return *m.Reasoning
+}
 
 func (m *Message) GetPrefix() bool {
 	if m.Prefix == nil {
@@ -854,30 +893,47 @@ type WebSearchOptions struct {
 
 // https://platform.openai.com/docs/api-reference/responses/create
 type OpenAIResponsesRequest struct {
-	Model              string          `json:"model"`
-	Input              json.RawMessage `json:"input,omitempty"`
-	Include            json.RawMessage `json:"include,omitempty"`
+	Model   string          `json:"model"`
+	Input   json.RawMessage `json:"input,omitempty"`
+	Include json.RawMessage `json:"include,omitempty"`
+	// 在后台运行推理，暂时还不支持依赖的接口
+	// Background         json.RawMessage `json:"background,omitempty"`
+	Conversation       json.RawMessage `json:"conversation,omitempty"`
+	ContextManagement  json.RawMessage `json:"context_management,omitempty"`
 	Instructions       json.RawMessage `json:"instructions,omitempty"`
-	MaxOutputTokens    uint            `json:"max_output_tokens,omitempty"`
+	MaxOutputTokens    *uint           `json:"max_output_tokens,omitempty"`
+	TopLogProbs        *int            `json:"top_logprobs,omitempty"`
 	Metadata           json.RawMessage `json:"metadata,omitempty"`
+	Moderation         json.RawMessage `json:"moderation,omitempty"`
 	ParallelToolCalls  json.RawMessage `json:"parallel_tool_calls,omitempty"`
 	PreviousResponseID string          `json:"previous_response_id,omitempty"`
 	Reasoning          *Reasoning      `json:"reasoning,omitempty"`
-	// 服务层级字段，用于指定 API 服务等级。允许透传可能导致实际计费高于预期，默认应过滤
-	ServiceTier          string          `json:"service_tier,omitempty"`
+	// ServiceTier specifies upstream service level and may affect billing.
+	// This field is filtered by default and can be enabled via channel setting allow_service_tier.
+	ServiceTier string `json:"service_tier,omitempty"`
+	// Store controls whether upstream may store request/response data.
+	// This field is allowed by default and can be disabled via channel setting disable_store.
 	Store                json.RawMessage `json:"store,omitempty"`
 	PromptCacheKey       json.RawMessage `json:"prompt_cache_key,omitempty"`
+	PromptCacheOptions   json.RawMessage `json:"prompt_cache_options,omitempty"`
 	PromptCacheRetention json.RawMessage `json:"prompt_cache_retention,omitempty"`
-	Stream               bool            `json:"stream,omitempty"`
-	Temperature          *float64        `json:"temperature,omitempty"`
-	Text                 json.RawMessage `json:"text,omitempty"`
-	ToolChoice           json.RawMessage `json:"tool_choice,omitempty"`
-	Tools                json.RawMessage `json:"tools,omitempty"` // 需要处理的参数很少，MCP 参数太多不确定，所以用 map
-	TopP                 *float64        `json:"top_p,omitempty"`
-	Truncation           string          `json:"truncation,omitempty"`
-	User                 string          `json:"user,omitempty"`
-	MaxToolCalls         uint            `json:"max_tool_calls,omitempty"`
-	Prompt               json.RawMessage `json:"prompt,omitempty"`
+	// SafetyIdentifier carries client identity for policy abuse detection.
+	// This field is filtered by default and can be enabled via channel setting allow_safety_identifier.
+	SafetyIdentifier json.RawMessage `json:"safety_identifier,omitempty"`
+	Stream           *bool           `json:"stream,omitempty"`
+	StreamOptions    *StreamOptions  `json:"stream_options,omitempty"`
+	Temperature      *float64        `json:"temperature,omitempty"`
+	Text             json.RawMessage `json:"text,omitempty"`
+	ToolChoice       json.RawMessage `json:"tool_choice,omitempty"`
+	Tools            json.RawMessage `json:"tools,omitempty"` // 需要处理的参数很少，MCP 参数太多不确定，所以用 map
+	TopP             *float64        `json:"top_p,omitempty"`
+	Truncation       json.RawMessage `json:"truncation,omitempty"`
+	User             json.RawMessage `json:"user,omitempty"`
+	MaxToolCalls     *uint           `json:"max_tool_calls,omitempty"`
+	Prompt           json.RawMessage `json:"prompt,omitempty"`
+	// Codex Responses metadata/client_metadata:
+	// https://github.com/openai/codex/commit/14df0e8833aad0d6d78287954b61ffac67af936c
+	ClientMetadata json.RawMessage `json:"client_metadata,omitempty"`
 	// qwen
 	EnableThinking json.RawMessage `json:"enable_thinking,omitempty"`
 	// perplexity
@@ -895,7 +951,7 @@ func (r *OpenAIResponsesRequest) GetTokenCountMeta() *types.TokenCountMeta {
 				if input.ImageUrl != "" {
 					fileMeta = append(fileMeta, &types.FileMeta{
 						FileType: types.FileTypeImage,
-						Source:   createFileSource(input.ImageUrl),
+						Source:   types.NewFileSourceFromData(input.ImageUrl, ""),
 						Detail:   input.Detail,
 					})
 				}
@@ -903,7 +959,7 @@ func (r *OpenAIResponsesRequest) GetTokenCountMeta() *types.TokenCountMeta {
 				if input.FileUrl != "" {
 					fileMeta = append(fileMeta, &types.FileMeta{
 						FileType: types.FileTypeFile,
-						Source:   createFileSource(input.FileUrl),
+						Source:   types.NewFileSourceFromData(input.FileUrl, ""),
 					})
 				}
 			} else {
@@ -939,12 +995,12 @@ func (r *OpenAIResponsesRequest) GetTokenCountMeta() *types.TokenCountMeta {
 	return &types.TokenCountMeta{
 		CombineText: strings.Join(texts, "\n"),
 		Files:       fileMeta,
-		MaxTokens:   int(r.MaxOutputTokens),
+		MaxTokens:   int(lo.FromPtrOr(r.MaxOutputTokens, uint(0))),
 	}
 }
 
 func (r *OpenAIResponsesRequest) IsStream(c *gin.Context) bool {
-	return r.Stream
+	return lo.FromPtrOr(r.Stream, false)
 }
 
 func (r *OpenAIResponsesRequest) SetModelName(modelName string) {
@@ -962,8 +1018,10 @@ func (r *OpenAIResponsesRequest) GetToolsMap() []map[string]any {
 }
 
 type Reasoning struct {
-	Effort  string `json:"effort,omitempty"`
-	Summary string `json:"summary,omitempty"`
+	Effort  string          `json:"effort,omitempty"`
+	Summary string          `json:"summary,omitempty"`
+	Mode    json.RawMessage `json:"mode,omitempty"`
+	Context json.RawMessage `json:"context,omitempty"`
 }
 
 type Input struct {

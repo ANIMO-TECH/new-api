@@ -2,63 +2,87 @@ package logger
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/logutils"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
+
+	"github.com/bytedance/gopkg/util/gopool"
 	"github.com/gin-gonic/gin"
 )
 
+const (
+	loggerINFO  = "INFO"
+	loggerWarn  = "WARN"
+	loggerError = "ERR"
+	loggerDebug = "DEBUG"
+)
+
+const maxLogCount = 1000000
+
+var logCount int
+var setupLogLock sync.Mutex
+var setupLogWorking bool
+var currentLogPath string
+var currentLogPathMu sync.RWMutex
+var currentLogFile *os.File
+
+func GetCurrentLogPath() string {
+	currentLogPathMu.RLock()
+	defer currentLogPathMu.RUnlock()
+	return currentLogPath
+}
+
 func SetupLogger() {
-	var output io.Writer = os.Stdout
+	defer func() {
+		setupLogWorking = false
+	}()
 	if *common.LogDir != "" {
+		ok := setupLogLock.TryLock()
+		if !ok {
+			log.Println("setup log is already working")
+			return
+		}
+		defer func() {
+			setupLogLock.Unlock()
+		}()
 		logPath := filepath.Join(*common.LogDir, fmt.Sprintf("oneapi-%s.log", time.Now().Format("20060102150405")))
 		fd, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
 			log.Fatal("failed to open log file")
 		}
-		output = io.MultiWriter(os.Stdout, fd)
-		gin.DefaultWriter = output
-		gin.DefaultErrorWriter = output
-	} else {
-		gin.DefaultWriter = os.Stdout
-		gin.DefaultErrorWriter = os.Stderr
-	}
+		currentLogPathMu.Lock()
+		oldFile := currentLogFile
+		currentLogPath = logPath
+		currentLogFile = fd
+		currentLogPathMu.Unlock()
 
-	level := "info"
-	if common.DebugEnabled {
-		level = "debug"
+		common.LogWriterMu.Lock()
+		gin.DefaultWriter = io.MultiWriter(os.Stdout, fd)
+		gin.DefaultErrorWriter = io.MultiWriter(os.Stderr, fd)
+		if oldFile != nil {
+			_ = oldFile.Close()
+		}
+		common.LogWriterMu.Unlock()
 	}
-	envName := os.Getenv("APP_ENV")
-	if envName == "" {
-		envName = os.Getenv("NODE_TYPE")
-	}
-	logutils.Init(logutils.InitOptions{
-		Writer:         output,
-		Level:          level,
-		Env:            envName,
-		ServiceName:    "new-api",
-		ServiceVersion: common.Version,
-	})
 }
 
 func LogInfo(ctx context.Context, msg string) {
-	logutils.Info(ctx).Msg(msg)
+	logHelper(ctx, loggerINFO, msg)
 }
 
 func LogWarn(ctx context.Context, msg string) {
-	logutils.Warn(ctx).Msg(msg)
+	logHelper(ctx, loggerWarn, msg)
 }
 
 func LogError(ctx context.Context, msg string) {
-	logutils.Error(ctx).Msg(msg)
+	logHelper(ctx, loggerError, msg)
 }
 
 func LogDebug(ctx context.Context, msg string, args ...any) {
@@ -66,7 +90,32 @@ func LogDebug(ctx context.Context, msg string, args ...any) {
 		if len(args) > 0 {
 			msg = fmt.Sprintf(msg, args...)
 		}
-		logutils.Debug(ctx).Msg(msg)
+		logHelper(ctx, loggerDebug, msg)
+	}
+}
+
+func logHelper(ctx context.Context, level string, msg string) {
+	var id any = "SYSTEM"
+	if ctx != nil {
+		if requestID := ctx.Value(common.RequestIdKey); requestID != nil {
+			id = requestID
+		}
+	}
+	now := time.Now()
+	common.LogWriterMu.RLock()
+	writer := gin.DefaultErrorWriter
+	if level == loggerINFO {
+		writer = gin.DefaultWriter
+	}
+	_, _ = fmt.Fprintf(writer, "[%s] %v | %s | %s \n", level, now.Format("2006/01/02 - 15:04:05"), id, msg)
+	common.LogWriterMu.RUnlock()
+	logCount++ // we don't need accurate count, so no lock here
+	if logCount > maxLogCount && !setupLogWorking {
+		logCount = 0
+		setupLogWorking = true
+		gopool.Go(func() {
+			SetupLogger()
+		})
 	}
 }
 
@@ -125,10 +174,13 @@ func FormatQuota(quota int) string {
 
 // LogJson 仅供测试使用 only for test
 func LogJson(ctx context.Context, msg string, obj any) {
-	jsonStr, err := json.Marshal(obj)
+	if !common.DebugEnabled {
+		return
+	}
+	jsonStr, err := common.Marshal(obj)
 	if err != nil {
 		LogError(ctx, fmt.Sprintf("json marshal failed: %s", err.Error()))
 		return
 	}
-	LogDebug(ctx, fmt.Sprintf("%s | %s", msg, string(jsonStr)))
+	LogDebug(ctx, "%s | %s", msg, jsonStr)
 }

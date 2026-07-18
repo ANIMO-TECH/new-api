@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -106,11 +107,17 @@ func HandleOAuth(c *gin.Context) {
 	// 7. Find or create user
 	user, err := findOrCreateOAuthUser(c, provider, oauthUser, session)
 	if err != nil {
+		if errors.Is(err, model.ErrEmailAlreadyTaken) {
+			common.ApiErrorI18n(c, i18n.MsgUserEmailAlreadyTaken)
+			return
+		}
 		switch err.(type) {
 		case *OAuthUserDeletedError:
 			common.ApiErrorI18n(c, i18n.MsgOAuthUserDeleted)
 		case *OAuthRegistrationDisabledError:
 			common.ApiErrorI18n(c, i18n.MsgUserRegisterDisabled)
+		case *OAuthEmailAlreadyTakenError:
+			common.ApiErrorI18n(c, i18n.MsgUserEmailAlreadyTaken)
 		default:
 			common.ApiError(c, err)
 		}
@@ -190,7 +197,9 @@ func handleOAuthBind(c *gin.Context, provider oauth.Provider) {
 		}
 	}
 
-	common.ApiSuccessI18n(c, i18n.MsgOAuthBindSuccess, nil)
+	common.ApiSuccessI18n(c, i18n.MsgOAuthBindSuccess, gin.H{
+		"action": "bind",
+	})
 }
 
 // findOrCreateOAuthUser finds existing user or creates new user
@@ -237,6 +246,16 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 
 	// Set up new user
 	user.Username = provider.GetProviderPrefix() + strconv.Itoa(model.GetMaxUserId()+1)
+
+	if oauthUser.Username != "" {
+		if exists, err := model.CheckUserExistOrDeleted(oauthUser.Username, ""); err == nil && !exists {
+			// 防止索引退化
+			if len(oauthUser.Username) <= model.UserNameMaxLength {
+				user.Username = oauthUser.Username
+			}
+		}
+	}
+
 	if oauthUser.DisplayName != "" {
 		user.DisplayName = oauthUser.DisplayName
 	} else if oauthUser.Username != "" {
@@ -245,7 +264,13 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 		user.DisplayName = provider.GetName() + " User"
 	}
 	if oauthUser.Email != "" {
-		user.Email = oauthUser.Email
+		user.Email = model.NormalizeEmail(oauthUser.Email)
+		if err := model.EnsureEmailAvailable(user.Email, 0); err != nil {
+			if errors.Is(err, model.ErrEmailAlreadyTaken) {
+				return nil, &OAuthEmailAlreadyTakenError{}
+			}
+			return nil, err
+		}
 	}
 	user.Role = common.RoleCommonUser
 	user.Status = common.UserStatusEnabled
@@ -295,12 +320,12 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 			// Set the provider user ID on the user model and update
 			provider.SetProviderUserID(user, oauthUser.ProviderUserID)
 			if err := tx.Model(user).Updates(map[string]interface{}{
-				"github_id":    user.GitHubId,
-				"discord_id":   user.DiscordId,
-				"oidc_id":      user.OidcId,
-				"linux_do_id":  user.LinuxDOId,
-				"wechat_id":    user.WeChatId,
-				"telegram_id":  user.TelegramId,
+				"github_id":   user.GitHubId,
+				"discord_id":  user.DiscordId,
+				"oidc_id":     user.OidcId,
+				"linux_do_id": user.LinuxDOId,
+				"wechat_id":   user.WeChatId,
+				"telegram_id": user.TelegramId,
 			}).Error; err != nil {
 				return err
 			}
@@ -331,6 +356,12 @@ func (e *OAuthRegistrationDisabledError) Error() string {
 	return "registration is disabled"
 }
 
+type OAuthEmailAlreadyTakenError struct{}
+
+func (e *OAuthEmailAlreadyTakenError) Error() string {
+	return "email is already in use"
+}
+
 // handleOAuthError handles OAuth errors and returns translated message
 func handleOAuthError(c *gin.Context, err error) {
 	switch e := err.(type) {
@@ -340,6 +371,8 @@ func handleOAuthError(c *gin.Context, err error) {
 		} else {
 			common.ApiErrorI18n(c, e.MsgKey)
 		}
+	case *oauth.AccessDeniedError:
+		common.ApiErrorMsg(c, e.Message)
 	case *oauth.TrustLevelError:
 		common.ApiErrorI18n(c, i18n.MsgOAuthTrustLevelLow)
 	default:

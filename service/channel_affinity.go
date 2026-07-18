@@ -13,6 +13,7 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/pkg/cachex"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/samber/hot"
 	"github.com/tidwall/gjson"
@@ -44,6 +45,7 @@ type channelAffinityMeta struct {
 	TTLSeconds     int
 	RuleName       string
 	SkipRetry      bool
+	ParamTemplate  map[string]interface{}
 	KeySourceType  string
 	KeySourceKey   string
 	KeySourcePath  string
@@ -60,6 +62,12 @@ type ChannelAffinityStatsContext struct {
 	KeyFingerprint string
 	TTLSeconds     int64
 }
+
+const (
+	cacheTokenRateModeCachedOverPrompt           = "cached_over_prompt"
+	cacheTokenRateModeCachedOverPromptPlusCached = "cached_over_prompt_plus_cached"
+	cacheTokenRateModeMixed                      = "mixed"
+)
 
 type ChannelAffinityCacheStats struct {
 	Enabled       bool           `json:"enabled"`
@@ -158,8 +166,18 @@ func GetChannelAffinityCacheStats() ChannelAffinityCacheStats {
 			unknown++
 			continue
 		}
-		if rule.IncludeUsingGroup {
+		if rule.IncludeModelName {
 			if len(parts) < 3 {
+				unknown++
+				continue
+			}
+		}
+		if rule.IncludeUsingGroup {
+			minParts := 3
+			if rule.IncludeModelName {
+				minParts = 4
+			}
+			if len(parts) < minParts {
 				unknown++
 				continue
 			}
@@ -284,6 +302,11 @@ func extractChannelAffinityValue(c *gin.Context, src operation_setting.ChannelAf
 			return ""
 		}
 		return strings.TrimSpace(c.GetString(src.Key))
+	case "request_header":
+		if c == nil || c.Request == nil || src.Key == "" {
+			return ""
+		}
+		return strings.TrimSpace(c.Request.Header.Get(src.Key))
 	case "gjson":
 		if src.Path == "" {
 			return ""
@@ -311,10 +334,13 @@ func extractChannelAffinityValue(c *gin.Context, src operation_setting.ChannelAf
 	}
 }
 
-func buildChannelAffinityCacheKeySuffix(rule operation_setting.ChannelAffinityRule, usingGroup string, affinityValue string) string {
-	parts := make([]string, 0, 3)
+func buildChannelAffinityCacheKeySuffix(rule operation_setting.ChannelAffinityRule, modelName string, usingGroup string, affinityValue string) string {
+	parts := make([]string, 0, 4)
 	if rule.IncludeRuleName && rule.Name != "" {
 		parts = append(parts, rule.Name)
+	}
+	if rule.IncludeModelName && modelName != "" {
+		parts = append(parts, modelName)
 	}
 	if rule.IncludeUsingGroup && usingGroup != "" {
 		parts = append(parts, usingGroup)
@@ -408,6 +434,119 @@ func buildChannelAffinityKeyHint(s string) string {
 	return s[:4] + "..." + s[len(s)-4:]
 }
 
+func cloneStringAnyMap(src map[string]interface{}) map[string]interface{} {
+	if len(src) == 0 {
+		return map[string]interface{}{}
+	}
+	dst := make(map[string]interface{}, len(src))
+	for k, v := range src {
+		dst[k] = v
+	}
+	return dst
+}
+
+func mergeChannelOverride(base map[string]interface{}, tpl map[string]interface{}) map[string]interface{} {
+	if len(base) == 0 && len(tpl) == 0 {
+		return map[string]interface{}{}
+	}
+	if len(tpl) == 0 {
+		return base
+	}
+	out := cloneStringAnyMap(base)
+	for k, v := range tpl {
+		if strings.EqualFold(strings.TrimSpace(k), "operations") {
+			baseOps, hasBaseOps := extractParamOperations(out[k])
+			tplOps, hasTplOps := extractParamOperations(v)
+			if hasTplOps {
+				if hasBaseOps {
+					out[k] = append(tplOps, baseOps...)
+				} else {
+					out[k] = tplOps
+				}
+				continue
+			}
+		}
+		if _, exists := out[k]; exists {
+			continue
+		}
+		out[k] = v
+	}
+	return out
+}
+
+func extractParamOperations(value interface{}) ([]interface{}, bool) {
+	switch ops := value.(type) {
+	case []interface{}:
+		if len(ops) == 0 {
+			return []interface{}{}, true
+		}
+		cloned := make([]interface{}, 0, len(ops))
+		cloned = append(cloned, ops...)
+		return cloned, true
+	case []map[string]interface{}:
+		cloned := make([]interface{}, 0, len(ops))
+		for _, op := range ops {
+			cloned = append(cloned, op)
+		}
+		return cloned, true
+	default:
+		return nil, false
+	}
+}
+
+func appendChannelAffinityTemplateAdminInfo(c *gin.Context, meta channelAffinityMeta) {
+	if c == nil {
+		return
+	}
+	if len(meta.ParamTemplate) == 0 {
+		return
+	}
+
+	templateInfo := map[string]interface{}{
+		"applied":             true,
+		"rule_name":           meta.RuleName,
+		"param_override_keys": len(meta.ParamTemplate),
+	}
+	if anyInfo, ok := c.Get(ginKeyChannelAffinityLogInfo); ok {
+		if info, ok := anyInfo.(map[string]interface{}); ok {
+			info["override_template"] = templateInfo
+			c.Set(ginKeyChannelAffinityLogInfo, info)
+			return
+		}
+	}
+	c.Set(ginKeyChannelAffinityLogInfo, map[string]interface{}{
+		"reason":            meta.RuleName,
+		"rule_name":         meta.RuleName,
+		"using_group":       meta.UsingGroup,
+		"model":             meta.ModelName,
+		"request_path":      meta.RequestPath,
+		"key_source":        meta.KeySourceType,
+		"key_key":           meta.KeySourceKey,
+		"key_path":          meta.KeySourcePath,
+		"key_hint":          meta.KeyHint,
+		"key_fp":            meta.KeyFingerprint,
+		"override_template": templateInfo,
+	})
+}
+
+// ApplyChannelAffinityOverrideTemplate merges per-rule channel override templates onto the selected channel override config.
+func ApplyChannelAffinityOverrideTemplate(c *gin.Context, paramOverride map[string]interface{}) (map[string]interface{}, bool) {
+	if c == nil {
+		return paramOverride, false
+	}
+	meta, ok := getChannelAffinityMeta(c)
+	if !ok {
+		return paramOverride, false
+	}
+	if len(meta.ParamTemplate) == 0 {
+		return paramOverride, false
+	}
+
+	mergedParam := mergeChannelOverride(paramOverride, meta.ParamTemplate)
+	appendChannelAffinityTemplateAdminInfo(c, meta)
+	return mergedParam, true
+}
+
 func GetPreferredChannelByAffinity(c *gin.Context, modelName string, usingGroup string) (int, bool) {
 	setting := operation_setting.GetChannelAffinitySetting()
 	if setting == nil || !setting.Enabled {
@@ -452,13 +591,14 @@ func GetPreferredChannelByAffinity(c *gin.Context, modelName string, usingGroup 
 		if ttlSeconds <= 0 {
 			ttlSeconds = setting.DefaultTTLSeconds
 		}
-		cacheKeySuffix := buildChannelAffinityCacheKeySuffix(rule, usingGroup, affinityValue)
+		cacheKeySuffix := buildChannelAffinityCacheKeySuffix(rule, modelName, usingGroup, affinityValue)
 		cacheKeyFull := channelAffinityCacheNamespace + ":" + cacheKeySuffix
 		setChannelAffinityContext(c, channelAffinityMeta{
 			CacheKey:       cacheKeyFull,
 			TTLSeconds:     ttlSeconds,
 			RuleName:       rule.Name,
 			SkipRetry:      rule.SkipRetryOnFailure,
+			ParamTemplate:  cloneStringAnyMap(rule.ParamOverrideTemplate),
 			KeySourceType:  strings.TrimSpace(usedSource.Type),
 			KeySourceKey:   strings.TrimSpace(usedSource.Key),
 			KeySourcePath:  strings.TrimSpace(usedSource.Path),
@@ -488,14 +628,49 @@ func ShouldSkipRetryAfterChannelAffinityFailure(c *gin.Context) bool {
 		return false
 	}
 	v, ok := c.Get(ginKeyChannelAffinitySkipRetry)
+	if ok {
+		b, ok := v.(bool)
+		if ok {
+			return b
+		}
+	}
+	meta, ok := getChannelAffinityMeta(c)
 	if !ok {
 		return false
 	}
-	b, ok := v.(bool)
-	if !ok {
+	return meta.SkipRetry
+}
+
+func ClearCurrentChannelAffinityCache(c *gin.Context) bool {
+	if c == nil {
 		return false
 	}
-	return b
+	cacheKey, _, ok := getChannelAffinityContext(c)
+	if !ok || cacheKey == "" {
+		return false
+	}
+
+	cache := getChannelAffinityCache()
+	deleted, err := cache.DeleteMany([]string{cacheKey})
+	if err != nil {
+		common.SysError(fmt.Sprintf("channel affinity cache delete current failed: err=%v", err))
+		return false
+	}
+	c.Set(ginKeyChannelAffinitySkipRetry, false)
+	for _, ok := range deleted {
+		if ok {
+			return true
+		}
+	}
+	return false
+}
+
+func ShouldKeepChannelAffinityOnChannelDisabled() bool {
+	setting := operation_setting.GetChannelAffinitySetting()
+	if setting == nil {
+		return false
+	}
+	return setting.KeepOnChannelDisabled
 }
 
 func MarkChannelAffinityUsed(c *gin.Context, selectedGroup string, channelID int) {
@@ -565,9 +740,10 @@ func RecordChannelAffinity(c *gin.Context, channelID int) {
 }
 
 type ChannelAffinityUsageCacheStats struct {
-	RuleName       string `json:"rule_name"`
-	UsingGroup     string `json:"using_group"`
-	KeyFingerprint string `json:"key_fp"`
+	RuleName            string `json:"rule_name"`
+	UsingGroup          string `json:"using_group"`
+	KeyFingerprint      string `json:"key_fp"`
+	CachedTokenRateMode string `json:"cached_token_rate_mode"`
 
 	Hit           int64 `json:"hit"`
 	Total         int64 `json:"total"`
@@ -582,6 +758,8 @@ type ChannelAffinityUsageCacheStats struct {
 }
 
 type ChannelAffinityUsageCacheCounters struct {
+	CachedTokenRateMode string `json:"cached_token_rate_mode"`
+
 	Hit           int64 `json:"hit"`
 	Total         int64 `json:"total"`
 	WindowSeconds int64 `json:"window_seconds"`
@@ -596,12 +774,17 @@ type ChannelAffinityUsageCacheCounters struct {
 
 var channelAffinityUsageCacheStatsLocks [64]sync.Mutex
 
-func ObserveChannelAffinityUsageCacheFromContext(c *gin.Context, usage *dto.Usage) {
+// ObserveChannelAffinityUsageCacheByRelayFormat records usage cache stats with a stable rate mode derived from relay format.
+func ObserveChannelAffinityUsageCacheByRelayFormat(c *gin.Context, usage *dto.Usage, relayFormat types.RelayFormat) {
+	ObserveChannelAffinityUsageCacheFromContext(c, usage, cachedTokenRateModeByRelayFormat(relayFormat))
+}
+
+func ObserveChannelAffinityUsageCacheFromContext(c *gin.Context, usage *dto.Usage, cachedTokenRateMode string) {
 	statsCtx, ok := GetChannelAffinityStatsContext(c)
 	if !ok {
 		return
 	}
-	observeChannelAffinityUsageCache(statsCtx, usage)
+	observeChannelAffinityUsageCache(statsCtx, usage, cachedTokenRateMode)
 }
 
 func GetChannelAffinityUsageCacheStats(ruleName, usingGroup, keyFp string) ChannelAffinityUsageCacheStats {
@@ -628,6 +811,7 @@ func GetChannelAffinityUsageCacheStats(ruleName, usingGroup, keyFp string) Chann
 		}
 	}
 	return ChannelAffinityUsageCacheStats{
+		CachedTokenRateMode:  v.CachedTokenRateMode,
 		RuleName:             ruleName,
 		UsingGroup:           usingGroup,
 		KeyFingerprint:       keyFp,
@@ -643,7 +827,7 @@ func GetChannelAffinityUsageCacheStats(ruleName, usingGroup, keyFp string) Chann
 	}
 }
 
-func observeChannelAffinityUsageCache(statsCtx ChannelAffinityStatsContext, usage *dto.Usage) {
+func observeChannelAffinityUsageCache(statsCtx ChannelAffinityStatsContext, usage *dto.Usage, cachedTokenRateMode string) {
 	entryKey := channelAffinityUsageCacheEntryKey(statsCtx.RuleName, statsCtx.UsingGroup, statsCtx.KeyFingerprint)
 	if entryKey == "" {
 		return
@@ -669,6 +853,14 @@ func observeChannelAffinityUsageCache(statsCtx ChannelAffinityStatsContext, usag
 	if !found {
 		next = ChannelAffinityUsageCacheCounters{}
 	}
+	currentMode := normalizeCachedTokenRateMode(cachedTokenRateMode)
+	if currentMode != "" {
+		if next.CachedTokenRateMode == "" {
+			next.CachedTokenRateMode = currentMode
+		} else if next.CachedTokenRateMode != currentMode && next.CachedTokenRateMode != cacheTokenRateModeMixed {
+			next.CachedTokenRateMode = cacheTokenRateModeMixed
+		}
+	}
 	next.Total++
 	hit, cachedTokens, promptCacheHitTokens := usageCacheSignals(usage)
 	if hit {
@@ -682,6 +874,30 @@ func observeChannelAffinityUsageCache(statsCtx ChannelAffinityStatsContext, usag
 	next.CompletionTokens += int64(usageCompletionTokens(usage))
 	next.TotalTokens += int64(usageTotalTokens(usage))
 	_ = cache.SetWithTTL(entryKey, next, ttl)
+}
+
+func normalizeCachedTokenRateMode(mode string) string {
+	switch mode {
+	case cacheTokenRateModeCachedOverPrompt:
+		return cacheTokenRateModeCachedOverPrompt
+	case cacheTokenRateModeCachedOverPromptPlusCached:
+		return cacheTokenRateModeCachedOverPromptPlusCached
+	case cacheTokenRateModeMixed:
+		return cacheTokenRateModeMixed
+	default:
+		return ""
+	}
+}
+
+func cachedTokenRateModeByRelayFormat(relayFormat types.RelayFormat) string {
+	switch relayFormat {
+	case types.RelayFormatOpenAI, types.RelayFormatOpenAIResponses, types.RelayFormatOpenAIResponsesCompaction:
+		return cacheTokenRateModeCachedOverPrompt
+	case types.RelayFormatClaude:
+		return cacheTokenRateModeCachedOverPromptPlusCached
+	default:
+		return ""
+	}
 }
 
 func channelAffinityUsageCacheEntryKey(ruleName, usingGroup, keyFp string) string {

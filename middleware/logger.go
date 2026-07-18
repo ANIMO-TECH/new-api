@@ -7,6 +7,15 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+const RouteTagKey = "route_tag"
+
+func RouteTag(tag string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Set(RouteTagKey, tag)
+		c.Next()
+	}
+}
+
 func SetUpLogger(server *gin.Engine) {
 	server.Use(func(c *gin.Context) {
 		start := time.Now()
@@ -15,7 +24,6 @@ func SetUpLogger(server *gin.Engine) {
 
 		c.Next()
 
-		latency := time.Since(start)
 		statusCode := c.Writer.Status()
 		event := logutils.Info(c.Request.Context())
 		if statusCode >= 500 || len(c.Errors) > 0 {
@@ -23,15 +31,19 @@ func SetUpLogger(server *gin.Engine) {
 		} else if statusCode >= 400 {
 			event = logutils.Warn(c.Request.Context())
 		}
-
+		tag := c.GetString(RouteTagKey)
+		if tag == "" {
+			tag = "web"
+		}
 		event.
 			Str("log_source", "http").
+			Str("route_tag", tag).
 			Int("status_code", statusCode).
 			Str("method", c.Request.Method).
 			Str("path", path).
 			Str("query", query).
 			Str("client_ip", c.ClientIP()).
-			Dur("latency", latency).
+			Dur("latency", time.Since(start)).
 			Int("body_size", c.Writer.Size())
 		if len(c.Errors) > 0 {
 			event.Str("errors", c.Errors.String())

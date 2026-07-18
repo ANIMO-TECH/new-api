@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/service/relayconvert"
 	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/QuantumNous/new-api/types"
 
@@ -41,11 +43,32 @@ func (a *Adaptor) Init(info *relaycommon.RelayInfo) {
 }
 
 func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
-	baseURL := fmt.Sprintf("%s/v1/messages", info.ChannelBaseUrl)
-	if info.IsClaudeBetaQuery {
-		baseURL = baseURL + "?beta=true"
+	requestURL := fmt.Sprintf("%s/v1/messages", info.ChannelBaseUrl)
+	if !shouldAppendClaudeBetaQuery(info) {
+		return requestURL, nil
 	}
-	return baseURL, nil
+
+	parsedURL, err := url.Parse(requestURL)
+	if err != nil {
+		return "", err
+	}
+	query := parsedURL.Query()
+	query.Set("beta", "true")
+	parsedURL.RawQuery = query.Encode()
+	return parsedURL.String(), nil
+}
+
+func shouldAppendClaudeBetaQuery(info *relaycommon.RelayInfo) bool {
+	if info == nil {
+		return false
+	}
+	if info.IsClaudeBetaQuery {
+		return true
+	}
+	if info.ChannelOtherSettings.ClaudeBetaQuery {
+		return true
+	}
+	return false
 }
 
 func CommonClaudeHeadersOperation(c *gin.Context, req *http.Header, info *relaycommon.RelayInfo) {
@@ -73,7 +96,11 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayIn
 	if request == nil {
 		return nil, errors.New("request is nil")
 	}
-	return RequestOpenAI2ClaudeMessage(c, *request)
+	result, err := relayconvert.ConvertRequest(c, info, types.RelayFormatClaude, request)
+	if err != nil {
+		return nil, err
+	}
+	return result.Value, nil
 }
 
 func (a *Adaptor) ConvertRerankRequest(c *gin.Context, relayMode int, request dto.RerankRequest) (any, error) {

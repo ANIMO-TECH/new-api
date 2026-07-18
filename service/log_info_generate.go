@@ -1,16 +1,53 @@
 package service
 
 import (
+	"encoding/base64"
+	"fmt"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
 )
+
+// attachQuotaSaturationToOther nests a quota saturation marker under
+// other.admin_info.quota_saturation. Nesting under admin_info makes it
+// admin-only for free, since model.formatUserLogs strips the whole admin_info
+// object for non-admin viewers. Creates admin_info if absent. No-op when the
+// clamp is nil (the common case: no saturation happened).
+func attachQuotaSaturationToOther(other map[string]interface{}, clamp *common.QuotaClamp) {
+	if clamp == nil || other == nil {
+		return
+	}
+	adminInfo, ok := other["admin_info"].(map[string]interface{})
+	if !ok || adminInfo == nil {
+		adminInfo = map[string]interface{}{}
+		other["admin_info"] = adminInfo
+	}
+	adminInfo["quota_saturation"] = clamp.AuditMap()
+}
+
+// attachQuotaSaturation records the request's quota clamp (if any) onto the
+// consume log's other.admin_info and emits a request-correlated backend audit
+// line. Called right before RecordConsumeLog on the text/audio/wss paths.
+func attachQuotaSaturation(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, other map[string]interface{}) {
+	if relayInfo == nil {
+		return
+	}
+	clamp := relayInfo.QuotaClamp
+	if clamp == nil {
+		return
+	}
+	attachQuotaSaturationToOther(other, clamp)
+	logger.LogWarn(ctx, fmt.Sprintf("quota saturation on consume log: op=%s kind=%s original=%g clamped=%d user=%d model=%s",
+		clamp.Op, clamp.Kind, clamp.Original, clamp.Clamped, relayInfo.UserId, relayInfo.OriginModelName))
+}
 
 func appendRequestPath(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, other map[string]interface{}) {
 	if other == nil {
@@ -95,8 +132,45 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 	}
 	appendRequestPath(ctx, relayInfo, other)
 	appendRequestConversionChain(relayInfo, other)
+	appendFinalRequestFormat(relayInfo, other)
 	appendBillingInfo(relayInfo, other)
+	appendParamOverrideInfo(relayInfo, other)
+	appendStreamStatus(relayInfo, other)
 	return other
+}
+
+func appendParamOverrideInfo(relayInfo *relaycommon.RelayInfo, other map[string]interface{}) {
+	if relayInfo == nil || other == nil || len(relayInfo.ParamOverrideAudit) == 0 {
+		return
+	}
+	other["po"] = relayInfo.ParamOverrideAudit
+}
+
+func appendStreamStatus(relayInfo *relaycommon.RelayInfo, other map[string]interface{}) {
+	if relayInfo == nil || other == nil || !relayInfo.IsStream || relayInfo.StreamStatus == nil {
+		return
+	}
+	ss := relayInfo.StreamStatus
+	status := "ok"
+	if !ss.IsNormalEnd() || ss.HasErrors() {
+		status = "error"
+	}
+	streamInfo := map[string]interface{}{
+		"status":     status,
+		"end_reason": string(ss.EndReason),
+	}
+	if ss.EndError != nil {
+		streamInfo["end_error"] = ss.EndError.Error()
+	}
+	if ss.ErrorCount > 0 {
+		streamInfo["error_count"] = ss.ErrorCount
+		messages := make([]string, 0, len(ss.Errors))
+		for _, e := range ss.Errors {
+			messages = append(messages, e.Message)
+		}
+		streamInfo["errors"] = messages
+	}
+	other["stream_status"] = streamInfo
 }
 
 func appendBillingInfo(relayInfo *relaycommon.RelayInfo, other map[string]interface{}) {
@@ -181,6 +255,17 @@ func appendRequestConversionChain(relayInfo *relaycommon.RelayInfo, other map[st
 	other["request_conversion"] = chain
 }
 
+func appendFinalRequestFormat(relayInfo *relaycommon.RelayInfo, other map[string]interface{}) {
+	if relayInfo == nil || other == nil {
+		return
+	}
+	if relayInfo.GetFinalRequestRelayFormat() == types.RelayFormatClaude {
+		// claude indicates the final upstream request format is Claude Messages.
+		// Frontend log rendering uses this to keep the original Claude input display.
+		other["claude"] = true
+	}
+}
+
 func GenerateWssOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage *dto.RealtimeUsage, modelRatio, groupRatio, completionRatio, audioRatio, audioCompletionRatio, modelPrice, userGroupRatio float64) map[string]interface{} {
 	info := GenerateTextOtherInfo(ctx, relayInfo, modelRatio, groupRatio, completionRatio, 0, 0.0, modelPrice, userGroupRatio)
 	info["ws"] = true
@@ -226,7 +311,7 @@ func GenerateClaudeOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo,
 	return info
 }
 
-func GenerateMjOtherInfo(relayInfo *relaycommon.RelayInfo, priceData types.PerCallPriceData) map[string]interface{} {
+func GenerateMjOtherInfo(relayInfo *relaycommon.RelayInfo, priceData types.PriceData) map[string]interface{} {
 	other := make(map[string]interface{})
 	other["model_price"] = priceData.ModelPrice
 	other["group_ratio"] = priceData.GroupRatioInfo.GroupRatio
@@ -235,4 +320,22 @@ func GenerateMjOtherInfo(relayInfo *relaycommon.RelayInfo, priceData types.PerCa
 	}
 	appendRequestPath(nil, relayInfo, other)
 	return other
+}
+
+// InjectTieredBillingInfo overlays tiered billing fields onto an existing
+// module-specific other map. Call this after GenerateTextOtherInfo /
+// GenerateClaudeOtherInfo / etc. when the request used tiered_expr billing.
+func InjectTieredBillingInfo(other map[string]interface{}, relayInfo *relaycommon.RelayInfo, result *billingexpr.TieredResult) {
+	if relayInfo == nil || other == nil {
+		return
+	}
+	snap := relayInfo.TieredBillingSnapshot
+	if snap == nil {
+		return
+	}
+	other["billing_mode"] = "tiered_expr"
+	other["expr_b64"] = base64.StdEncoding.EncodeToString([]byte(snap.ExprString))
+	if result != nil {
+		other["matched_tier"] = result.MatchedTier
+	}
 }
