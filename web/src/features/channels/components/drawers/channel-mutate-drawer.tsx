@@ -3710,6 +3710,181 @@ export function ChannelMutateDrawer({
                               )}
                             />
 
+                            <div className='space-y-4 rounded-lg border border-sky-500/30 bg-sky-500/5 p-4'>
+                              <div className='space-y-1'>
+                                <div className='flex items-center gap-2'>
+                                  <Badge variant='secondary'>Advoo</Badge>
+                                  <h4 className='text-sm font-medium'>
+                                    {t('Custom test request extension')}
+                                  </h4>
+                                </div>
+                                <p className='text-muted-foreground text-xs'>
+                                  {t(
+                                    'This is an Advoo extension and is separate from the official new-api channel test settings.'
+                                  )}
+                                </p>
+                              </div>
+
+                              <FormField
+                                control={form.control}
+                                name='test_endpoint_type'
+                                render={({ field }) => (
+                                  <FormItem>
+                                    <FormLabel>
+                                      {t('Test endpoint type')}
+                                    </FormLabel>
+                                    <Select
+                                      items={[
+                                        {
+                                          value: 'auto',
+                                          label: t('Automatic'),
+                                        },
+                                        {
+                                          value: 'openai',
+                                          label: 'OpenAI Chat Completions',
+                                        },
+                                        {
+                                          value: 'openai-response',
+                                          label: 'OpenAI Responses',
+                                        },
+                                        {
+                                          value: 'openai-response-compact',
+                                          label: 'OpenAI Responses Compact',
+                                        },
+                                        {
+                                          value: 'anthropic',
+                                          label: 'Anthropic Messages',
+                                        },
+                                        { value: 'gemini', label: 'Gemini' },
+                                        {
+                                          value: 'image-generation',
+                                          label: t('Image generation'),
+                                        },
+                                        {
+                                          value: 'embeddings',
+                                          label: 'Embeddings',
+                                        },
+                                        {
+                                          value: 'jina-rerank',
+                                          label: 'Rerank',
+                                        },
+                                      ]}
+                                      value={field.value}
+                                      onValueChange={field.onChange}
+                                      disabled={sensitiveLocked || isSubmitting}
+                                    >
+                                      <FormControl>
+                                        <SelectTrigger>
+                                          <SelectValue />
+                                        </SelectTrigger>
+                                      </FormControl>
+                                      <SelectContent
+                                        alignItemWithTrigger={false}
+                                      >
+                                        <SelectGroup>
+                                          <SelectItem value='auto'>
+                                            {t('Automatic')}
+                                          </SelectItem>
+                                          <SelectItem value='openai'>
+                                            OpenAI Chat Completions
+                                          </SelectItem>
+                                          <SelectItem value='openai-response'>
+                                            OpenAI Responses
+                                          </SelectItem>
+                                          <SelectItem value='openai-response-compact'>
+                                            OpenAI Responses Compact
+                                          </SelectItem>
+                                          <SelectItem value='anthropic'>
+                                            Anthropic Messages
+                                          </SelectItem>
+                                          <SelectItem value='gemini'>
+                                            Gemini
+                                          </SelectItem>
+                                          <SelectItem value='image-generation'>
+                                            {t('Image generation')}
+                                          </SelectItem>
+                                          <SelectItem value='embeddings'>
+                                            Embeddings
+                                          </SelectItem>
+                                          <SelectItem value='jina-rerank'>
+                                            Rerank
+                                          </SelectItem>
+                                        </SelectGroup>
+                                      </SelectContent>
+                                    </Select>
+                                    <FormDescription>
+                                      {t(
+                                        'Select the API shape used by manual tests, scheduled tests, and Advoo recovery probes.'
+                                      )}
+                                    </FormDescription>
+                                    <FormMessage />
+                                  </FormItem>
+                                )}
+                              />
+
+                              <FormField
+                                control={form.control}
+                                name='test_request_body'
+                                render={({ field }) => (
+                                  <FormItem>
+                                    <div className='flex items-center justify-between gap-2'>
+                                      <div>
+                                        <FormLabel>
+                                          {t('Custom test request body')}
+                                        </FormLabel>
+                                        <FormDescription>
+                                          {t(
+                                            'The backend validates this JSON and always replaces its model and stream fields with the selected test values.'
+                                          )}
+                                        </FormDescription>
+                                      </div>
+                                      <Button
+                                        type='button'
+                                        variant='outline'
+                                        size='sm'
+                                        disabled={
+                                          sensitiveLocked || isSubmitting
+                                        }
+                                        onClick={() =>
+                                          field.onChange(
+                                            JSON.stringify(
+                                              {
+                                                model: 'gpt-image-2',
+                                                prompt: 'A solid blue square',
+                                                size: '1024x1536',
+                                                quality: 'low',
+                                                n: 1,
+                                                output_format: 'jpeg',
+                                              },
+                                              null,
+                                              2
+                                            )
+                                          )
+                                        }
+                                      >
+                                        {t('Low-cost image template')}
+                                      </Button>
+                                    </div>
+                                    <FormControl>
+                                      <JsonCodeEditor
+                                        value={field.value || ''}
+                                        onChange={field.onChange}
+                                        name={field.name}
+                                        onBlur={field.onBlur}
+                                        textareaRef={field.ref}
+                                        disabled={
+                                          sensitiveLocked || isSubmitting
+                                        }
+                                        heightClassName='h-48 min-h-48 max-h-48'
+                                        placeholder='{"messages":[{"role":"user","content":"hi"}]}'
+                                      />
+                                    </FormControl>
+                                    <FormMessage />
+                                  </FormItem>
+                                )}
+                              />
+                            </div>
+
                             <FormField
                               control={form.control}
                               name='auto_ban'
@@ -4233,9 +4408,7 @@ export function ChannelMutateDrawer({
                                         <SelectValue />
                                       </SelectTrigger>
                                     </FormControl>
-                                    <SelectContent
-                                      alignItemWithTrigger={false}
-                                    >
+                                    <SelectContent alignItemWithTrigger={false}>
                                       <SelectGroup>
                                         <SelectItem value='auto'>
                                           {t('Auto')}

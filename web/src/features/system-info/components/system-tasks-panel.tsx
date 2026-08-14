@@ -81,6 +81,7 @@ const PROGRESS_BAR_CLASS_NAME: Record<SystemTaskStatus, string> = {
 const TYPE_LABEL: Record<string, string> = {
   log_cleanup: 'Log cleanup',
   channel_test: 'Batch channel test',
+  channel_health_probe: 'Advoo channel health probe',
   model_update: 'Batch upstream model update',
   midjourney_poll: 'Drawing task polling',
   async_task_poll: 'Async task polling',

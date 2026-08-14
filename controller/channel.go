@@ -472,6 +472,22 @@ func validateTwoFactorAuth(twoFA *model.TwoFA, code string) bool {
 
 // validateChannel 通用的渠道校验函数
 func validateChannel(channel *model.Channel, isAdd bool) error {
+	if channel.TestEndpointType != nil && !isSupportedChannelTestEndpoint(*channel.TestEndpointType) {
+		return fmt.Errorf("不支持的测试接口类型：%s", strings.TrimSpace(*channel.TestEndpointType))
+	}
+	if channel.TestRequestBody != nil && strings.TrimSpace(*channel.TestRequestBody) != "" {
+		trimmed := strings.TrimSpace(*channel.TestRequestBody)
+		if len(trimmed) > maxChannelTestRequestBodyBytes {
+			return fmt.Errorf("自定义测试请求体不能超过 %d 字节", maxChannelTestRequestBodyBytes)
+		}
+		if !strings.HasPrefix(trimmed, "{") {
+			return fmt.Errorf("自定义测试请求体必须是 JSON 对象")
+		}
+		var requestBody map[string]json.RawMessage
+		if err := common.Unmarshal([]byte(trimmed), &requestBody); err != nil || requestBody == nil {
+			return fmt.Errorf("自定义测试请求体必须是 JSON 对象")
+		}
+	}
 	if channel == nil {
 		return fmt.Errorf("channel cannot be empty")
 	}
@@ -1137,6 +1153,7 @@ func UpdateChannelStatus(c *gin.Context) {
 	}
 	changed := model.UpdateChannelStatus(id, "", req.Status, "manual operation")
 	if changed {
+		_ = model.ClearChannelHealthProbeStates(id)
 		model.InitChannelCache()
 	}
 	recordManageAudit(c, "channel.status_update", map[string]interface{}{
@@ -1160,6 +1177,7 @@ func BatchUpdateChannelStatus(c *gin.Context) {
 	changedCount := 0
 	for _, id := range req.Ids {
 		if model.UpdateChannelStatus(id, "", req.Status, "manual batch operation") {
+			_ = model.ClearChannelHealthProbeStates(id)
 			changedCount++
 		}
 	}

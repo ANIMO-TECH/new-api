@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -19,9 +20,44 @@ import (
 // service.StartSystemTaskRunner.
 func RegisterScheduledSystemTasks() {
 	service.RegisterSystemTaskHandler(channelTestHandler{})
+	service.RegisterSystemTaskHandler(channelHealthProbeHandler{})
 	service.RegisterSystemTaskHandler(modelUpdateHandler{})
 	service.RegisterSystemTaskHandler(midjourneyPollHandler{})
 	service.RegisterSystemTaskHandler(asyncTaskPollHandler{})
+}
+
+type channelHealthProbeHandler struct{}
+
+var channelHealthProbeInitialized atomic.Bool
+
+func (channelHealthProbeHandler) Type() string { return model.SystemTaskTypeHealthProbe }
+
+func (channelHealthProbeHandler) Enabled() bool {
+	if !operation_setting.GetHealthProbeSetting().Enabled {
+		channelHealthProbeInitialized.Store(false)
+		return false
+	}
+	if !channelHealthProbeInitialized.Load() {
+		return true
+	}
+	return model.HasDueChannelHealthProbe(common.GetTimestamp())
+}
+
+func (channelHealthProbeHandler) Interval() time.Duration {
+	setting := operation_setting.GetHealthProbeSetting()
+	return time.Duration(setting.ScanIntervalSeconds) * time.Second
+}
+
+func (channelHealthProbeHandler) NewPayload() any { return nil }
+
+func (channelHealthProbeHandler) Run(ctx context.Context, task *model.SystemTask, runnerID string) {
+	summary, err := runChannelHealthProbeTask(ctx, service.NewSystemTaskProgressReporter(task, runnerID))
+	if err != nil {
+		finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, nil, err)
+		return
+	}
+	channelHealthProbeInitialized.Store(true)
+	finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusSucceeded, summary, nil)
 }
 
 // channelTestHandler runs the scheduled "test all channels" job. Enablement and

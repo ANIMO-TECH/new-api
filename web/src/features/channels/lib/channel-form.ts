@@ -212,6 +212,22 @@ export const channelFormSchema = z
     priority: z.number().optional(),
     weight: z.number().optional(),
     test_model: z.string().optional(),
+    test_endpoint_type: z.enum([
+      'auto',
+      'openai',
+      'openai-response',
+      'openai-response-compact',
+      'anthropic',
+      'gemini',
+      'jina-rerank',
+      'image-generation',
+      'embeddings',
+    ]),
+    test_request_body: z
+      .string()
+      .max(65536, 'Custom test request body must not exceed 64 KiB')
+      .optional()
+      .refine(isOptionalJsonObject, ERROR_MESSAGES.INVALID_JSON),
     auto_ban: z.number().optional(),
     status: z.number(),
     status_code_mapping: z
@@ -410,6 +426,8 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   priority: 0,
   weight: 0,
   test_model: '',
+  test_endpoint_type: 'auto',
+  test_request_body: '',
   auto_ban: 1,
   status: CHANNEL_STATUS.ENABLED,
   status_code_mapping: '',
@@ -487,8 +505,7 @@ export function transformChannelToFormDefaults(
         thinking_to_content: parsed.thinking_to_content || false,
         proxy: parsed.proxy || '',
         http_protocol: protocol,
-        http2_connection_shards:
-          protocol === HTTP_PROTOCOL_HTTP1 ? 1 : shards,
+        http2_connection_shards: protocol === HTTP_PROTOCOL_HTTP1 ? 1 : shards,
         pass_through_body_enabled: parsed.pass_through_body_enabled || false,
         system_prompt: parsed.system_prompt || '',
         system_prompt_override: parsed.system_prompt_override || false,
@@ -562,6 +579,9 @@ export function transformChannelToFormDefaults(
     priority: channel.priority || 0,
     weight: channel.weight || 0,
     test_model: channel.test_model || '',
+    test_endpoint_type: (channel.test_endpoint_type ||
+      'auto') as ChannelFormValues['test_endpoint_type'],
+    test_request_body: channel.test_request_body || '',
     auto_ban: channel.auto_ban ?? 1,
     status: channel.status,
     status_code_mapping: channel.status_code_mapping || '',
@@ -788,6 +808,11 @@ export function transformFormDataToCreatePayload(formData: ChannelFormValues): {
     priority: formData.priority || null,
     weight: formData.weight || null,
     test_model: formData.test_model || null,
+    test_endpoint_type:
+      formData.test_endpoint_type === 'auto'
+        ? null
+        : formData.test_endpoint_type || null,
+    test_request_body: formData.test_request_body || null,
     auto_ban: formData.auto_ban ?? 1,
     status: formData.status,
     status_code_mapping: formData.status_code_mapping || null,
@@ -836,6 +861,11 @@ export function transformFormDataToUpdatePayload(
     priority: formData.priority ?? 0,
     weight: formData.weight ?? 0,
     test_model: formData.test_model || null,
+    test_endpoint_type:
+      formData.test_endpoint_type === 'auto'
+        ? null
+        : formData.test_endpoint_type || null,
+    test_request_body: formData.test_request_body || null,
     auto_ban: formData.auto_ban ?? 1,
     status_code_mapping: formData.status_code_mapping || null,
     tag: formData.tag || null,
@@ -863,6 +893,11 @@ export function transformFormDataToUpdatePayload(
   payload.base_url = normalizeBaseUrl(formData.base_url) || ''
   payload.openai_organization = formData.openai_organization || ''
   payload.test_model = formData.test_model || ''
+  payload.test_endpoint_type =
+    formData.test_endpoint_type === 'auto'
+      ? ''
+      : formData.test_endpoint_type || ''
+  payload.test_request_body = formData.test_request_body || ''
   payload.tag = formData.tag || ''
   payload.remark = formData.remark || ''
   payload.model_mapping = formData.model_mapping || ''

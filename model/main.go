@@ -290,6 +290,7 @@ func migrateDB() error {
 		&SystemInstance{},
 		&SystemTask{},
 		&SystemTaskLock{},
+		&ChannelHealthProbeState{},
 		&CasbinRule{},
 		&AuthzRole{},
 	)

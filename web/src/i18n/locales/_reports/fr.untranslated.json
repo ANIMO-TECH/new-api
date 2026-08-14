@@ -1,0 +1,12 @@
+{
+  "This is an Advoo extension and is separate from the official new-api channel test settings.": "This is an Advoo extension and is separate from the official new-api channel test settings.",
+  "Select the API shape used by manual tests, scheduled tests, and Advoo recovery probes.": "Select the API shape used by manual tests, scheduled tests, and Advoo recovery probes.",
+  "The backend validates this JSON and always replaces its model and stream fields with the selected test values.": "The backend validates this JSON and always replaces its model and stream fields with the selected test values.",
+  "The official re-enable option is currently on, but Advoo recovery takes precedence while this extension is enabled.": "The official re-enable option is currently on, but Advoo recovery takes precedence while this extension is enabled.",
+  "Probe only channels or keys disabled by real request failures.": "Probe only channels or keys disabled by real request failures.",
+  "How often the scheduler looks for due recovery probes.": "How often the scheduler looks for due recovery probes.",
+  "Delay between a real-request auto-disable and the first probe.": "Delay between a real-request auto-disable and the first probe.",
+  "Upper bound for the delay between probes.": "Upper bound for the delay between probes.",
+  "Use 0 to keep retrying indefinitely.": "Use 0 to keep retrying indefinitely.",
+  "Notify the root user when a probe restores a channel or key.": "Notify the root user when a probe restores a channel or key."
+}

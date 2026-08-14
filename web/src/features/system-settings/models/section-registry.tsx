@@ -21,6 +21,7 @@ import { IoNetDeploymentSettingsSection } from '../integrations/ionet-deployment
 import type { ModelSettings } from '../types'
 import { createSectionRegistry } from '../utils/section-registry'
 import { ClaudeSettingsCard } from './claude-settings-card'
+import { CustomHealthProbeSection } from './custom-health-probe-section'
 import { GeminiSettingsCard } from './gemini-settings-card'
 import { GlobalSettingsCard } from './global-settings-card'
 import { GrokSettingsCard } from './grok-settings-card'
@@ -85,6 +86,33 @@ const MODELS_SECTIONS = [
             settings['monitor_setting.auto_test_channel_minutes'],
           'monitor_setting.channel_test_mode':
             settings['monitor_setting.channel_test_mode'],
+        }}
+      />
+    ),
+  },
+  {
+    id: 'advoo-health-probe',
+    titleKey: 'Advoo Health Probe',
+    build: (settings: ModelSettings) => (
+      <CustomHealthProbeSection
+        defaultValues={{
+          enabled: settings['health_probe_setting.enabled'],
+          scanIntervalSeconds:
+            settings['health_probe_setting.scan_interval_seconds'],
+          requestTimeoutSeconds:
+            settings['health_probe_setting.request_timeout_seconds'],
+          concurrency: settings['health_probe_setting.concurrency'],
+          initialDelaySeconds:
+            settings['health_probe_setting.initial_delay_seconds'],
+          backoffMultiplier:
+            settings['health_probe_setting.backoff_multiplier'],
+          maxBackoffSeconds:
+            settings['health_probe_setting.max_backoff_seconds'],
+          maxAttempts: settings['health_probe_setting.max_attempts'],
+          notifyOnRecovery: settings['health_probe_setting.notify_on_recovery'],
+          notifyOnExhausted:
+            settings['health_probe_setting.notify_on_exhausted'],
+          officialAutoRecoveryEnabled: settings.AutomaticEnableChannelEnabled,
         }}
       />
     ),

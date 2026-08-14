@@ -239,6 +239,16 @@ export type ModelSettings = {
     | 'scheduled_all'
     | 'auto_ban_only'
     | 'passive_recovery'
+  'health_probe_setting.enabled': boolean
+  'health_probe_setting.scan_interval_seconds': number
+  'health_probe_setting.request_timeout_seconds': number
+  'health_probe_setting.concurrency': number
+  'health_probe_setting.initial_delay_seconds': number
+  'health_probe_setting.backoff_multiplier': number
+  'health_probe_setting.max_backoff_seconds': number
+  'health_probe_setting.max_attempts': number
+  'health_probe_setting.notify_on_recovery': boolean
+  'health_probe_setting.notify_on_exhausted': boolean
   'channel_affinity_setting.enabled': boolean
   'channel_affinity_setting.switch_on_success': boolean
   'channel_affinity_setting.keep_on_channel_disabled': boolean

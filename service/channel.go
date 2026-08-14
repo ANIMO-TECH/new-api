@@ -27,6 +27,12 @@ func DisableChannel(channelError types.ChannelError, reason string) {
 
 	success := model.UpdateChannelStatus(channelError.ChannelId, channelError.UsingKey, common.ChannelStatusAutoDisabled, reason)
 	if success {
+		probeSetting := operation_setting.GetHealthProbeSetting()
+		if probeSetting.Enabled {
+			if err := model.RegisterChannelHealthProbe(channelError.ChannelId, channelError.UsingKey, int64(probeSetting.InitialDelaySeconds)); err != nil {
+				common.SysLog(fmt.Sprintf("通道「%s」（#%d）登记 Advoo 探活失败：%v", channelError.ChannelName, channelError.ChannelId, err))
+			}
+		}
 		subject := fmt.Sprintf("通道「%s」（#%d）已被禁用", channelError.ChannelName, channelError.ChannelId)
 		content := fmt.Sprintf("通道「%s」（#%d）已被禁用，原因：%s", channelError.ChannelName, channelError.ChannelId, reason)
 		NotifyRootUser(formatNotifyType(channelError.ChannelId, common.ChannelStatusAutoDisabled), subject, content)
@@ -36,6 +42,9 @@ func DisableChannel(channelError types.ChannelError, reason string) {
 func EnableChannel(channelId int, usingKey string, channelName string) {
 	success := model.UpdateChannelStatus(channelId, usingKey, common.ChannelStatusEnabled, "")
 	if success {
+		if err := model.ClearChannelHealthProbeTarget(channelId, usingKey); err != nil {
+			common.SysLog(fmt.Sprintf("通道「%s」（#%d）清理 Advoo 探活状态失败：%v", channelName, channelId, err))
+		}
 		subject := fmt.Sprintf("通道「%s」（#%d）已被启用", channelName, channelId)
 		content := fmt.Sprintf("通道「%s」（#%d）已被启用", channelName, channelId)
 		NotifyRootUser(formatNotifyType(channelId, common.ChannelStatusEnabled), subject, content)
@@ -65,6 +74,9 @@ func ShouldDisableChannel(err *types.NewAPIError) bool {
 }
 
 func ShouldEnableChannel(newAPIError *types.NewAPIError, status int) bool {
+	if operation_setting.GetHealthProbeSetting().Enabled {
+		return false
+	}
 	if !common.AutomaticEnableChannelEnabled {
 		return false
 	}

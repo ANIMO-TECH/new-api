@@ -41,10 +41,32 @@ type testResult struct {
 	newAPIError *types.NewAPIError
 }
 
+func isSupportedChannelTestEndpoint(endpointType string) bool {
+	switch constant.EndpointType(strings.TrimSpace(endpointType)) {
+	case "",
+		constant.EndpointTypeOpenAI,
+		constant.EndpointTypeOpenAIResponse,
+		constant.EndpointTypeOpenAIResponseCompact,
+		constant.EndpointTypeAnthropic,
+		constant.EndpointTypeGemini,
+		constant.EndpointTypeJinaRerank,
+		constant.EndpointTypeImageGeneration,
+		constant.EndpointTypeEmbeddings:
+		return true
+	default:
+		return false
+	}
+}
+
 func normalizeChannelTestEndpoint(channel *model.Channel, endpointType string) string {
 	normalized := strings.TrimSpace(endpointType)
 	if normalized != "" {
 		return normalized
+	}
+	if channel != nil && channel.TestEndpointType != nil {
+		if configured := strings.TrimSpace(*channel.TestEndpointType); configured != "" {
+			return configured
+		}
 	}
 	if channel != nil && channel.Type == constant.ChannelTypeCodex {
 		return string(constant.EndpointTypeOpenAIResponse)
@@ -108,6 +130,9 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 	}
 
 	endpointType = normalizeChannelTestEndpoint(channel, endpointType)
+	if !isSupportedChannelTestEndpoint(endpointType) {
+		return testResult{localErr: fmt.Errorf("unsupported channel test endpoint type: %s", endpointType)}
+	}
 
 	requestPath := "/v1/chat/completions"
 
@@ -227,6 +252,16 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 	}
 
 	request := buildTestRequest(testModel, endpointType, channel, isStream)
+	if channel.TestRequestBody != nil && strings.TrimSpace(*channel.TestRequestBody) != "" {
+		request, err = parseChannelTestRequest(c, relayFormat, *channel.TestRequestBody, testModel, endpointType, isStream)
+		if err != nil {
+			return testResult{
+				context:     c,
+				localErr:    fmt.Errorf("invalid custom test request: %w", err),
+				newAPIError: types.NewError(err, types.ErrorCodeInvalidRequest),
+			}
+		}
+	}
 
 	info, err := relaycommon.GenRelayInfo(c, relayFormat, request, nil)
 
@@ -831,6 +866,55 @@ func buildTestRequest(model string, endpointType string, channel *model.Channel,
 	}
 
 	return testRequest
+}
+
+const maxChannelTestRequestBodyBytes = 64 * 1024
+
+func parseChannelTestRequest(c *gin.Context, relayFormat types.RelayFormat, body string, testModel string, endpointType string, isStream bool) (dto.Request, error) {
+	trimmed := strings.TrimSpace(body)
+	if trimmed == "" {
+		return nil, errors.New("request body is empty")
+	}
+	if len(trimmed) > maxChannelTestRequestBodyBytes {
+		return nil, fmt.Errorf("request body exceeds %d bytes", maxChannelTestRequestBodyBytes)
+	}
+	if !strings.HasPrefix(trimmed, "{") {
+		return nil, errors.New("request body must be a JSON object")
+	}
+
+	var raw map[string]json.RawMessage
+	if err := common.Unmarshal([]byte(trimmed), &raw); err != nil {
+		return nil, err
+	}
+	if raw == nil {
+		return nil, errors.New("request body must be a JSON object")
+	}
+	modelJSON, err := common.Marshal(testModel)
+	if err != nil {
+		return nil, err
+	}
+	raw["model"] = modelJSON
+	switch constant.EndpointType(endpointType) {
+	case constant.EndpointTypeEmbeddings, constant.EndpointTypeJinaRerank, constant.EndpointTypeGemini:
+	default:
+		streamJSON, marshalErr := common.Marshal(isStream)
+		if marshalErr != nil {
+			return nil, marshalErr
+		}
+		raw["stream"] = streamJSON
+	}
+	requestJSON, err := common.Marshal(raw)
+	if err != nil {
+		return nil, err
+	}
+	c.Request.Body = io.NopCloser(bytes.NewReader(requestJSON))
+	c.Request.ContentLength = int64(len(requestJSON))
+	request, err := helper.GetAndValidateRequest(c, relayFormat)
+	if err != nil {
+		return nil, err
+	}
+	request.SetModelName(testModel)
+	return request, nil
 }
 
 func TestChannel(c *gin.Context) {
