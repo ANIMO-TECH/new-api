@@ -171,6 +171,72 @@ func TestOaiResponsesToChatBufferedStreamHandlerReturnsJSONFromSSE(t *testing.T)
 	require.Contains(t, got, `"finish_reason":"tool_calls"`)
 }
 
+func TestOaiResponsesToChatStreamHandlerRejectsInvalidSettlement(t *testing.T) {
+	oldMode := gin.Mode()
+	gin.SetMode(gin.TestMode)
+	t.Cleanup(func() { gin.SetMode(oldMode) })
+
+	oldTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 30
+	t.Cleanup(func() { constant.StreamingTimeout = oldTimeout })
+
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "top-level error event",
+			body: `data: {"type":"error","code":"server_error","message":"upstream overloaded"}
+
+`,
+		},
+		{
+			name: "missing terminal event",
+			body: `data: {"type":"response.created","response":{"id":"resp_1"}}
+
+data: [DONE]
+
+`,
+		},
+		{
+			name: "terminal event missing usage",
+			body: `data: {"type":"response.completed","response":{"status":"completed"}}
+
+`,
+		},
+		{
+			name: "zero output tokens",
+			body: `data: {"type":"response.completed","response":{"status":"completed","usage":{"input_tokens":2,"output_tokens":0,"total_tokens":2}}}
+
+`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c, _, resp, info := newResponsesChatTestContext(t, tt.body, true)
+			usage, apiErr := OaiResponsesToChatStreamHandler(c, info, resp)
+
+			require.Nil(t, usage)
+			require.NotNil(t, apiErr)
+			assert.Equal(t, types.ErrorCodeChannelInvalidResponse, apiErr.GetErrorCode())
+			assert.True(t, types.IsChannelError(apiErr))
+		})
+	}
+}
+
+func TestOaiResponsesToChatBufferedStreamHandlerRejectsMissingTerminal(t *testing.T) {
+	c, _, resp, info := newResponsesChatTestContext(t, `data: {"type":"response.output_text.delta","delta":"partial"}
+
+`, false)
+
+	usage, apiErr := OaiResponsesToChatBufferedStreamHandler(c, info, resp)
+
+	require.Nil(t, usage)
+	require.NotNil(t, apiErr)
+	assert.Equal(t, types.ErrorCodeChannelInvalidResponse, apiErr.GetErrorCode())
+}
+
 func TestOaiChatToResponsesStreamHandlerConvertsSSEOrderAndUsage(t *testing.T) {
 	oldMode := gin.Mode()
 	gin.SetMode(gin.TestMode)

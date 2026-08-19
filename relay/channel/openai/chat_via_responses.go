@@ -40,6 +40,9 @@ func OaiResponsesToChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	if oaiError := responsesResp.GetOpenAIError(); oaiError != nil && oaiError.Type != "" {
 		return nil, types.WithOpenAIError(*oaiError, resp.StatusCode)
 	}
+	if err := validateResponsesSettlement(responsesResp.Usage); err != nil {
+		return nil, err
+	}
 
 	chatResult, err := relayconvert.ConvertResponse(c, info, types.RelayFormatOpenAI, &responsesResp)
 	if err != nil {
@@ -53,12 +56,6 @@ func OaiResponsesToChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 		chatResp.Id = chatID
 	}
 	usage := chatResult.Usage
-
-	if usage == nil || usage.TotalTokens == 0 {
-		text := service.ExtractOutputTextFromResponses(&responsesResp)
-		usage = service.ResponseText2Usage(c, text, info.UpstreamModelName, info.GetEstimatePromptTokens())
-		chatResp.Usage = *usage
-	}
 
 	responseValue := any(chatResp)
 	if info.RelayFormat != types.RelayFormatOpenAI {
@@ -109,26 +106,19 @@ func OaiResponsesToChatBufferedStreamHandler(c *gin.Context, info *relaycommon.R
 			streamErr = types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 			break
 		}
+		isTerminal, eventErr := validateResponsesStreamSettlement(&streamResp)
+		if eventErr != nil {
+			streamErr = eventErr
+			break
+		}
 		accumulator.ProcessEvent(&streamResp)
-		switch streamResp.Type {
-		case "response.completed", "response.done", "response.incomplete":
+		if isTerminal {
 			finalResponse = streamResp.Response
 			if streamResp.Type == "response.incomplete" {
-				if finalResponse == nil {
-					finalResponse = &dto.OpenAIResponsesResponse{}
-				}
 				if len(finalResponse.Status) == 0 {
 					finalResponse.Status = []byte(`"incomplete"`)
 				}
 			}
-		case "response.failed", "response.error":
-			if streamResp.Response != nil {
-				if oaiErr := streamResp.Response.GetOpenAIError(); oaiErr != nil && oaiErr.Type != "" {
-					streamErr = types.WithOpenAIError(*oaiErr, http.StatusInternalServerError)
-					break
-				}
-			}
-			streamErr = types.NewOpenAIError(fmt.Errorf("responses stream error: %s", streamResp.Type), types.ErrorCodeBadResponse, http.StatusInternalServerError)
 		}
 		if streamErr != nil || finalResponse != nil {
 			break
@@ -141,12 +131,7 @@ func OaiResponsesToChatBufferedStreamHandler(c *gin.Context, info *relaycommon.R
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
 	}
 	if finalResponse == nil {
-		finalResponse = &dto.OpenAIResponsesResponse{
-			ID:        helper.GetResponseID(c),
-			CreatedAt: int(time.Now().Unix()),
-			Model:     info.UpstreamModelName,
-			Status:    []byte(`"completed"`),
-		}
+		return nil, invalidResponsesSettlementError()
 	}
 	accumulator.SupplementResponseOutput(finalResponse)
 
@@ -162,12 +147,6 @@ func OaiResponsesToChatBufferedStreamHandler(c *gin.Context, info *relaycommon.R
 		chatResp.Id = chatID
 	}
 	usage := chatResult.Usage
-	if usage == nil || usage.TotalTokens == 0 {
-		text := service.ExtractOutputTextFromResponses(finalResponse)
-		usage = service.ResponseText2Usage(c, text, info.UpstreamModelName, info.GetEstimatePromptTokens())
-		chatResp.Usage = *usage
-	}
-
 	responseValue := any(chatResp)
 	if info.RelayFormat != types.RelayFormatOpenAI {
 		targetResult, err := relayconvert.ConvertResponse(c, info, info.RelayFormat, chatResp)
@@ -203,6 +182,7 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
 	}
 	streamErr := (*types.NewAPIError)(nil)
+	hasValidSettlement := false
 
 	if info.RelayFormat == types.RelayFormatClaude && info.ClaudeConvertInfo == nil {
 		info.ClaudeConvertInfo = &relaycommon.ClaudeConvertInfo{LastMessagesType: relaycommon.LastMessageTypeNone}
@@ -280,17 +260,14 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 			return
 		}
 
-		if streamResp.Type == "response.error" || streamResp.Type == "response.failed" {
-			if streamResp.Response != nil {
-				if oaiErr := streamResp.Response.GetOpenAIError(); oaiErr != nil && oaiErr.Type != "" {
-					streamErr = types.WithOpenAIError(*oaiErr, http.StatusInternalServerError)
-					sr.Stop(streamErr)
-					return
-				}
-			}
-			streamErr = types.NewOpenAIError(fmt.Errorf("responses stream error: %s", streamResp.Type), types.ErrorCodeBadResponse, http.StatusInternalServerError)
+		isTerminal, eventErr := validateResponsesStreamSettlement(&streamResp)
+		if eventErr != nil {
+			streamErr = eventErr
 			sr.Stop(streamErr)
 			return
+		}
+		if isTerminal {
+			hasValidSettlement = true
 		}
 
 		results, err := relayconvert.ConvertStreamResponseChunk(c, info, state, &streamResp)
@@ -310,12 +287,11 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 	if streamErr != nil {
 		return nil, streamErr
 	}
+	if !hasValidSettlement {
+		return nil, invalidResponsesSettlementError()
+	}
 
 	usage := state.Usage()
-	if usage == nil || usage.TotalTokens == 0 {
-		usage = service.ResponseText2Usage(c, state.UsageText(), info.UpstreamModelName, info.GetEstimatePromptTokens())
-		state.SetUsage(usage)
-	}
 
 	if info.RelayFormat == types.RelayFormatClaude && info.ClaudeConvertInfo != nil {
 		info.ClaudeConvertInfo.Usage = usage
@@ -339,4 +315,32 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 		helper.Done(c)
 	}
 	return usage, nil
+}
+
+func invalidResponsesSettlementError() *types.NewAPIError {
+	return types.NewOpenAIError(fmt.Errorf("responses upstream did not return valid settlement usage"), types.ErrorCodeChannelInvalidResponse, http.StatusBadGateway)
+}
+
+func validateResponsesSettlement(usage *dto.Usage) *types.NewAPIError {
+	if usage == nil || usage.OutputTokens <= 0 {
+		return invalidResponsesSettlementError()
+	}
+	return nil
+}
+
+func validateResponsesStreamSettlement(event *dto.ResponsesStreamResponse) (bool, *types.NewAPIError) {
+	if event == nil {
+		return false, invalidResponsesSettlementError()
+	}
+	switch event.Type {
+	case "error", "response.error", "response.failed", "response.cancelled", "response.canceled":
+		return false, invalidResponsesSettlementError()
+	case "response.completed", "response.done", "response.incomplete":
+		if event.Response == nil {
+			return true, invalidResponsesSettlementError()
+		}
+		return true, validateResponsesSettlement(event.Response.Usage)
+	default:
+		return false, nil
+	}
 }
