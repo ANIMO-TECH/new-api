@@ -253,6 +253,15 @@ export function GlobalSettingsCard({ defaultValues }: GlobalSettingsCardProps) {
             </div>
 
             <Alert>
+              <AlertTitle>{t('Advoo custom extension')}</AlertTitle>
+              <AlertDescription>
+                {t(
+                  'This Chat Completions compatibility path is maintained by Advoo and includes Responses cache-token normalization for usage logs and billing.'
+                )}
+              </AlertDescription>
+            </Alert>
+
+            <Alert>
               <AlertTitle>{t('Warning')}</AlertTitle>
               <AlertDescription>
                 {t(

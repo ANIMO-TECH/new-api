@@ -5269,6 +5269,7 @@
     "Advoo Health Probe": "Advoo 自定义渠道探活",
     "Advoo channel health probe": "Advoo 渠道探活",
     "Advoo custom extension": "Advoo 自定义扩展",
+    "This Chat Completions compatibility path is maintained by Advoo and includes Responses cache-token normalization for usage logs and billing.": "此 Chat Completions 兼容链路由 Advoo 定制维护，并包含用于用量日志与计费的 Responses 缓存 Token 归一化逻辑。",
     "Advoo custom retry routing": "Advoo 自定义重试路由",
     "Failed channels are excluded within the current request. Retries exhaust untried channels at the current highest priority before falling back to a lower priority.": "同一次请求会排除已失败渠道；重试会先尝试当前最高优先级内尚未使用的渠道，全部耗尽后才降级到更低优先级。",
     "Custom test request extension": "自定义测试请求扩展",

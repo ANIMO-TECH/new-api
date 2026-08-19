@@ -5269,6 +5269,7 @@
     "Advoo Health Probe": "Advoo Health Probe",
     "Advoo channel health probe": "Advoo channel health probe",
     "Advoo custom extension": "Advoo custom extension",
+    "This Chat Completions compatibility path is maintained by Advoo and includes Responses cache-token normalization for usage logs and billing.": "This Chat Completions compatibility path is maintained by Advoo and includes Responses cache-token normalization for usage logs and billing.",
     "Advoo custom retry routing": "Advoo custom retry routing",
     "Failed channels are excluded within the current request. Retries exhaust untried channels at the current highest priority before falling back to a lower priority.": "Failed channels are excluded within the current request. Retries exhaust untried channels at the current highest priority before falling back to a lower priority.",
     "Custom test request extension": "Custom test request extension",

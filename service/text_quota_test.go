@@ -283,6 +283,55 @@ func TestCalculateTextQuotaSummaryUsesOpenAIBillingUsageBeforeTopLevelUsage(t *t
 	require.Equal(t, 98, summary.Quota)
 }
 
+func TestCalculateTextQuotaSummaryNormalizesResponsesBillingUsageDetails(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+
+	relayInfo := &relaycommon.RelayInfo{
+		RelayFormat:     types.RelayFormatOpenAI,
+		OriginModelName: "gpt-5.6",
+		PriceData: hosttypes.PriceData{
+			ModelRatio:      1,
+			CompletionRatio: 2,
+			CacheRatio:      0.25,
+			GroupRatioInfo:  hosttypes.GroupRatioInfo{GroupRatio: 1},
+		},
+		StartTime: time.Now(),
+	}
+
+	usage := &dto.Usage{
+		PromptTokens:     100,
+		CompletionTokens: 10,
+		TotalTokens:      110,
+		BillingUsage: dto.NewOpenAIResponsesBillingUsage(&dto.Usage{
+			InputTokens:  100,
+			OutputTokens: 10,
+			TotalTokens:  110,
+			InputTokensDetails: &dto.InputTokenDetails{
+				CachedTokens:         40,
+				CachedCreationTokens: 5,
+				CacheWriteTokens:     6,
+				TextTokens:           90,
+				AudioTokens:          3,
+				ImageTokens:          7,
+			},
+		}),
+	}
+
+	effectiveUsage := effectiveBillingUsage(usage)
+	summary := calculateTextQuotaSummary(ctx, relayInfo, effectiveUsage)
+
+	require.Equal(t, 40, effectiveUsage.PromptTokensDetails.CachedTokens)
+	require.Equal(t, 5, effectiveUsage.PromptTokensDetails.CachedCreationTokens)
+	require.Equal(t, 6, effectiveUsage.PromptTokensDetails.CacheWriteTokens)
+	require.Equal(t, 90, effectiveUsage.PromptTokensDetails.TextTokens)
+	require.Equal(t, 3, effectiveUsage.PromptTokensDetails.AudioTokens)
+	require.Equal(t, 7, effectiveUsage.PromptTokensDetails.ImageTokens)
+	require.Equal(t, 40, summary.CacheTokens)
+	require.Equal(t, 6, summary.CacheCreationTokens)
+}
+
 func TestUsageBillingPathForLog(t *testing.T) {
 	require.Equal(t, usageBillingPathAnthropic, usageBillingPathForLog(true, &dto.Usage{
 		BillingUsage: dto.NewClaudeMessagesBillingUsage(&dto.ClaudeUsage{InputTokens: 1}),
