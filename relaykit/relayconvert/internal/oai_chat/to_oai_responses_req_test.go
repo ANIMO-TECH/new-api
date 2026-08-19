@@ -75,6 +75,20 @@ func TestChatCompletionsRequestToResponsesRequestPreservesQwenThinkingBudget(t *
 	}
 }
 
+func TestChatCompletionsRequestToResponsesRequestPreservesPromptCacheSettings(t *testing.T) {
+	req := &dto.GeneralOpenAIRequest{
+		Model:                "gpt-test",
+		Messages:             []dto.Message{{Role: "user", Content: "hello"}},
+		PromptCacheKey:       "session-123",
+		PromptCacheRetention: json.RawMessage(`"24h"`),
+	}
+
+	got, err := ChatCompletionsRequestToResponsesRequest(req)
+	require.NoError(t, err)
+	assert.JSONEq(t, `"session-123"`, string(got.PromptCacheKey))
+	assert.JSONEq(t, `"24h"`, string(got.PromptCacheRetention))
+}
+
 func TestChatCompletionsRequestToResponsesRequestRejectsMultipleChoices(t *testing.T) {
 	_, err := ChatCompletionsRequestToResponsesRequest(&dto.GeneralOpenAIRequest{
 		Model: "gpt-test",
