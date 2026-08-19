@@ -5269,6 +5269,8 @@
     "Advoo Health Probe": "Advoo Health Probe",
     "Advoo channel health probe": "Advoo channel health probe",
     "Advoo custom extension": "Advoo custom extension",
+    "Advoo custom retry routing": "Advoo custom retry routing",
+    "Failed channels are excluded within the current request. Retries exhaust untried channels at the current highest priority before falling back to a lower priority.": "Failed channels are excluded within the current request. Retries exhaust untried channels at the current highest priority before falling back to a lower priority.",
     "Custom test request extension": "Custom test request extension",
     "This is an Advoo extension and is separate from the official new-api channel test settings.": "This is an Advoo extension and is separate from the official new-api channel test settings.",
     "Test endpoint type": "Test endpoint type",

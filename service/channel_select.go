@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"strconv"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -11,12 +12,13 @@ import (
 )
 
 type RetryParam struct {
-	Ctx          *gin.Context
-	TokenGroup   string
-	ModelName    string
-	RequestPath  string
-	Retry        *int
-	resetNextTry bool
+	Ctx                 *gin.Context
+	TokenGroup          string
+	ModelName           string
+	RequestPath         string
+	Retry               *int
+	attemptedChannelIDs map[int]struct{}
+	resetNextTry        bool
 }
 
 func (p *RetryParam) GetRetry() int {
@@ -43,6 +45,39 @@ func (p *RetryParam) IncreaseRetry() {
 
 func (p *RetryParam) ResetRetryNextTry() {
 	p.resetNextTry = true
+}
+
+func (p *RetryParam) attemptedChannels() []int {
+	attempted := make(map[int]struct{}, len(p.attemptedChannelIDs))
+	for channelID := range p.attemptedChannelIDs {
+		attempted[channelID] = struct{}{}
+	}
+	if p.Ctx != nil {
+		for _, rawChannelID := range p.Ctx.GetStringSlice("use_channel") {
+			channelID, err := strconv.Atoi(rawChannelID)
+			if err == nil && channelID > 0 {
+				attempted[channelID] = struct{}{}
+			}
+		}
+	}
+	if len(attempted) == 0 {
+		return nil
+	}
+	channelIDs := make([]int, 0, len(attempted))
+	for channelID := range attempted {
+		channelIDs = append(channelIDs, channelID)
+	}
+	return channelIDs
+}
+
+func (p *RetryParam) markChannelAttempted(channel *model.Channel) {
+	if channel == nil || channel.Id <= 0 {
+		return
+	}
+	if p.attemptedChannelIDs == nil {
+		p.attemptedChannelIDs = make(map[int]struct{})
+	}
+	p.attemptedChannelIDs[channel.Id] = struct{}{}
 }
 
 // CacheGetRandomSatisfiedChannel tries to get a random channel that satisfies the requirements.
@@ -153,10 +188,21 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 			break
 		}
 	} else {
-		channel, err = model.GetRandomSatisfiedChannel(param.TokenGroup, param.ModelName, param.GetRetry(), param.RequestPath)
+		// Advoo retry policy: exhaust untried channels at the highest remaining
+		// priority before falling back to a lower priority tier. Recomputing the
+		// highest priority after excluding attempted channels preserves weighted
+		// balancing within a tier without selecting the same failed channel again.
+		channel, err = model.GetRandomSatisfiedChannel(
+			param.TokenGroup,
+			param.ModelName,
+			0,
+			param.RequestPath,
+			param.attemptedChannels()...,
+		)
 		if err != nil {
 			return nil, param.TokenGroup, err
 		}
 	}
+	param.markChannelAttempted(channel)
 	return channel, selectGroup, nil
 }

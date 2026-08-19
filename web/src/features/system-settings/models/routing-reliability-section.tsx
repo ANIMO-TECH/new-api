@@ -23,6 +23,7 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import * as z from 'zod'
 
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import {
   Form,
   FormControl,
@@ -313,6 +314,15 @@ export function RoutingReliabilitySection({
             onSave={form.handleSubmit(onSubmit)}
             isSaving={updateOption.isPending}
           />
+
+          <Alert>
+            <AlertTitle>{t('Advoo custom retry routing')}</AlertTitle>
+            <AlertDescription>
+              {t(
+                'Failed channels are excluded within the current request. Retries exhaust untried channels at the current highest priority before falling back to a lower priority.'
+              )}
+            </AlertDescription>
+          </Alert>
 
           <div className='flex min-w-0 flex-col gap-4'>
             <div className='flex flex-col gap-1'>

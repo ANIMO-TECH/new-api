@@ -5269,6 +5269,8 @@
     "Advoo Health Probe": "Advoo 自定义渠道探活",
     "Advoo channel health probe": "Advoo 渠道探活",
     "Advoo custom extension": "Advoo 自定义扩展",
+    "Advoo custom retry routing": "Advoo 自定义重试路由",
+    "Failed channels are excluded within the current request. Retries exhaust untried channels at the current highest priority before falling back to a lower priority.": "同一次请求会排除已失败渠道；重试会先尝试当前最高优先级内尚未使用的渠道，全部耗尽后才降级到更低优先级。",
     "Custom test request extension": "自定义测试请求扩展",
     "This is an Advoo extension and is separate from the official new-api channel test settings.": "这是 Advoo 自定义扩展，与 new-api 官方渠道测试设置相互独立。",
     "Test endpoint type": "测试接口类型",
