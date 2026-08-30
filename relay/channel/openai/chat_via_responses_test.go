@@ -1,15 +1,19 @@
 package openai
 
 import (
+	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -223,6 +227,47 @@ data: [DONE]
 			assert.True(t, types.IsChannelError(apiErr))
 		})
 	}
+}
+
+func TestOaiResponsesToChatStreamHandlerAllowsClientCancelWithoutSettlement(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	reader, writer := io.Pipe()
+	t.Cleanup(func() {
+		_ = reader.Close()
+		_ = writer.Close()
+	})
+
+	c, _, resp, info := newResponsesChatTestContext(t, "", true)
+	c.Request = c.Request.WithContext(ctx)
+	resp.Body = reader
+
+	type result struct {
+		usage  *dto.Usage
+		apiErr *types.NewAPIError
+	}
+	done := make(chan result, 1)
+	go func() {
+		usage, apiErr := OaiResponsesToChatStreamHandler(c, info, resp)
+		done <- result{usage: usage, apiErr: apiErr}
+	}()
+
+	_, err := fmt.Fprintln(writer, `data: {"type":"response.created","response":{"id":"resp_1"}}`)
+	require.NoError(t, err)
+	cancel()
+
+	select {
+	case got := <-done:
+		require.NotNil(t, got.usage)
+		assert.Zero(t, got.usage.TotalTokens)
+		assert.Nil(t, got.apiErr)
+	case <-time.After(2 * time.Second):
+		t.Fatal("handler did not return after client cancellation")
+	}
+
+	require.NotNil(t, info.StreamStatus)
+	assert.Equal(t, relaycommon.StreamEndReasonClientGone, info.StreamStatus.EndReason)
 }
 
 func TestOaiResponsesToChatBufferedStreamHandlerRejectsMissingTerminal(t *testing.T) {

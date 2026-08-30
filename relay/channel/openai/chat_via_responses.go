@@ -288,6 +288,9 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 		return nil, streamErr
 	}
 	if !hasValidSettlement {
+		if info.StreamStatus.EndReason == relaycommon.StreamEndReasonClientGone {
+			return &dto.Usage{}, nil
+		}
 		return nil, invalidResponsesSettlementError()
 	}
 
