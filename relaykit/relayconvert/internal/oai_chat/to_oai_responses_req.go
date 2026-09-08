@@ -415,8 +415,7 @@ func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*d
 
 	if req.ReasoningEffort != "" {
 		out.Reasoning = &dto.Reasoning{
-			Effort:  req.ReasoningEffort,
-			Summary: "detailed",
+			Effort: req.ReasoningEffort,
 		}
 	}
 

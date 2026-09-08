@@ -89,6 +89,22 @@ func TestChatCompletionsRequestToResponsesRequestPreservesPromptCacheSettings(t 
 	assert.JSONEq(t, `"24h"`, string(got.PromptCacheRetention))
 }
 
+func TestChatCompletionsRequestToResponsesRequestDoesNotAddReasoningSummary(t *testing.T) {
+	got, err := ChatCompletionsRequestToResponsesRequest(&dto.GeneralOpenAIRequest{
+		Model:           "gpt-test",
+		ReasoningEffort: "medium",
+		Messages:        []dto.Message{{Role: "user", Content: "hello"}},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, got.Reasoning)
+	assert.Equal(t, "medium", got.Reasoning.Effort)
+	assert.Empty(t, got.Reasoning.Summary)
+
+	encoded, err := kitutil.Marshal(got)
+	require.NoError(t, err)
+	assert.False(t, gjson.GetBytes(encoded, "reasoning.summary").Exists())
+}
+
 func TestChatCompletionsRequestToResponsesRequestRejectsMultipleChoices(t *testing.T) {
 	_, err := ChatCompletionsRequestToResponsesRequest(&dto.GeneralOpenAIRequest{
 		Model: "gpt-test",
