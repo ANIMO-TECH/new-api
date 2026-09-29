@@ -1,0 +1,9 @@
+{
+  "expected_hostname": "example-test-host",
+  "application_id": "example-coolify-application-id",
+  "region": "cn-hongkong",
+  "bucket": "example-log-archive",
+  "prefix": "example-test/model-gateway",
+  "state_directory": "/var/lib/newapi-logarchive",
+  "delete_enabled": false
+}

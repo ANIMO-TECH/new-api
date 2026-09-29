@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -32,14 +33,50 @@ var setupLogWorking bool
 var currentLogPath string
 var currentLogPathMu sync.RWMutex
 var currentLogFile *os.File
+var rotatingLogFile *rotatingFile
+var rotationEnabled atomic.Bool
 
 func GetCurrentLogPath() string {
 	currentLogPathMu.RLock()
-	defer currentLogPathMu.RUnlock()
-	return currentLogPath
+	w, path := rotatingLogFile, currentLogPath
+	currentLogPathMu.RUnlock()
+	if w != nil {
+		return w.CurrentPath()
+	}
+	return path
 }
 
 func SetupLogger() {
+	enabled, maxBytes, maxAge, err := rotationSettings()
+	if err != nil {
+		log.Fatal(err)
+	}
+	if enabled && *common.LogDir != "" {
+		setupLogLock.Lock()
+		defer setupLogLock.Unlock()
+		currentLogPathMu.RLock()
+		w := rotatingLogFile
+		currentLogPathMu.RUnlock()
+		if w != nil {
+			if err := w.Rotate(); err != nil {
+				log.Printf("log rotation failed; retaining available log file: %v", err)
+			}
+			return
+		}
+		w, err = newRotatingFile(*common.LogDir, maxBytes, maxAge)
+		if err != nil {
+			log.Fatalf("failed to initialize rotating log: %v", err)
+		}
+		currentLogPathMu.Lock()
+		rotatingLogFile = w
+		currentLogPathMu.Unlock()
+		common.LogWriterMu.Lock()
+		gin.DefaultWriter = logMirror{console: os.Stdout, file: w}
+		gin.DefaultErrorWriter = logMirror{console: os.Stderr, file: w}
+		rotationEnabled.Store(true)
+		common.LogWriterMu.Unlock()
+		return
+	}
 	defer func() {
 		setupLogWorking = false
 	}()
@@ -109,6 +146,9 @@ func logHelper(ctx context.Context, level string, msg string) {
 	}
 	_, _ = fmt.Fprintf(writer, "[%s] %v | %s | %s \n", level, now.Format("2006/01/02 - 15:04:05"), id, msg)
 	common.LogWriterMu.RUnlock()
+	if rotationEnabled.Load() {
+		return
+	}
 	logCount++ // we don't need accurate count, so no lock here
 	if logCount > maxLogCount && !setupLogWorking {
 		logCount = 0

@@ -1,0 +1,26 @@
+[Unit]
+Description=Verified archive and retention for the test model gateway
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/sbin/newapi-logarchive --config /etc/newapi-logarchive.json
+Restart=on-failure
+RestartSec=15
+TimeoutStopSec=180
+UMask=0077
+Nice=19
+IOSchedulingClass=idle
+CPUQuota=25%
+MemoryMax=256M
+Environment=GOMAXPROCS=1
+Environment=GOMEMLIMIT=128MiB
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true
+LimitNOFILE=2048
+
+[Install]
+WantedBy=multi-user.target
