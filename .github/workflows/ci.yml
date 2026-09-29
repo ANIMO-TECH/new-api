@@ -54,8 +54,33 @@ jobs:
         working-directory: relaykit
         run: go build ./...
 
+      - name: Race-check log rotation
+        run: go test -race ./logger
+
       - name: Test root and relaykit modules
         run: make test
+
+  log-archive:
+    name: Log archive safety and race checks
+    if: github.event.action != 'closed' || github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: ops/logarchive
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: ops/logarchive/go.mod
+          cache-dependency-path: ops/logarchive/go.sum
+      - name: Verify archive safety on Linux
+        run: |
+          go vet ./...
+          go test -race ./...
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build ./...
 
   frontend:
     name: Frontend typecheck and test
