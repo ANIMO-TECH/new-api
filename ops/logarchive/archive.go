@@ -206,16 +206,25 @@ func restoreArchive(ctx context.Context, store objectStore, key string, output i
 		return manifest{}, err
 	}
 	defer r.Close()
-	data, err := io.ReadAll(io.LimitReader(r, 8<<20))
+	const maxManifestSize = 8 << 20
+	data, err := io.ReadAll(io.LimitReader(r, maxManifestSize+1))
 	if err != nil {
 		return manifest{}, err
+	}
+	if len(data) > maxManifestSize {
+		return manifest{}, errors.New("archive manifest exceeds recovery size limit")
 	}
 	var m manifest
 	if err := json.Unmarshal(data, &m); err != nil {
 		return manifest{}, errors.New("invalid archive manifest JSON")
 	}
-	if m.Version != 1 || (requireClosed && !m.Complete) || (m.Complete && len(m.SHA256) != 64) {
+	if m.Version != 1 || m.Size < 0 || (requireClosed && !m.Complete) || (m.Complete && len(m.SHA256) != 64) {
 		return manifest{}, errors.New("archive is not a verified complete file")
+	}
+	// Bind recovery to the original content-addressed receipt. Internal chunk
+	// checksums alone cannot detect a consistently rewritten manifest and payload.
+	if path.Base(key) != fmt.Sprintf("manifest-%016d-%s.json", m.Size, digest(data)) {
+		return manifest{}, errors.New("archive manifest does not match its receipt key")
 	}
 	h := sha256.New()
 	if err := restoreChunks(ctx, store, m, io.MultiWriter(output, h)); err != nil {
