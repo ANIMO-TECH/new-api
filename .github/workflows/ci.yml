@@ -54,11 +54,11 @@ jobs:
         working-directory: relaykit
         run: go build ./...
 
-      - name: Test root and relaykit modules
-        run: make test
-
       - name: Race-check log rotation
         run: go test -race ./logger
+
+      - name: Test root and relaykit modules
+        run: make test
 
   log-archive:
     name: Log archive safety and race checks
