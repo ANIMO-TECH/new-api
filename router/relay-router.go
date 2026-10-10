@@ -110,6 +110,11 @@ func SetRelayRouter(router *gin.Engine) {
 			controller.Relay(c, types.RelayFormatOpenAIAlphaSearch)
 		})
 
+		// decision model routes (OpenRouter /api/alpha/decisions)
+		httpRouter.POST("/alpha/decisions", func(c *gin.Context) {
+			controller.Relay(c, types.RelayFormatOpenRouterDecisions)
+		})
+
 		// image related routes
 		httpRouter.POST("/edits", func(c *gin.Context) {
 			controller.Relay(c, types.RelayFormatOpenAIImage)

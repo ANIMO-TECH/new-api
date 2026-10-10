@@ -114,6 +114,10 @@ func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
 			info.ChannelBaseUrl = baseUrl
 		}
 	}
+	// OpenRouter serves decisions at /api/alpha/decisions, outside its /v1 prefix.
+	if info.ChannelType == constant.ChannelTypeOpenRouter && info.RelayMode == relayconstant.RelayModeDecisions {
+		return info.ChannelBaseUrl + "/alpha/decisions", nil
+	}
 	switch info.ChannelType {
 	case constant.ChannelTypeAzure:
 		apiVersion := info.ApiVersion
