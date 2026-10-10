@@ -332,8 +332,9 @@ function formatTokenHint(n: number | string | null | undefined): string {
 
 function formatNumberDraft(value: number | string): string {
   if (value === '') return ''
-  if (typeof value === 'number')
+  if (typeof value === 'number') {
     return Number.isFinite(value) ? String(value) : '0'
+  }
   return value
 }
 
@@ -436,12 +437,10 @@ function ConditionRow({ condition, onChange, onRemove }: ConditionRowProps) {
   return (
     <div className='flex items-center gap-2'>
       <Select
-        items={[
-          ...CONDITION_INPUT_OPTIONS.map((option) => ({
-            value: option.value,
-            label: t(option.labelKey),
-          })),
-        ]}
+        items={CONDITION_INPUT_OPTIONS.map((option) => ({
+          value: option.value,
+          label: t(option.labelKey),
+        }))}
         value={condition.var}
         onValueChange={(value) =>
           onChange({ ...condition, var: value as TierConditionInput['var'] })
@@ -667,6 +666,7 @@ function VisualTierCard({
         ) : (
           tier.conditions.map((condition, conditionIndex) => (
             <ConditionRow
+              // eslint-disable-next-line react/no-array-index-key -- Legacy conditions have no persistent IDs.
               key={conditionIndex}
               condition={condition}
               onChange={(next) => handleConditionChange(conditionIndex, next)}
@@ -849,6 +849,7 @@ function VisualEditor({ visualConfig, onChange }: VisualEditorProps) {
       </p>
       {config.tiers.map((tier, index) => (
         <VisualTierCard
+          // eslint-disable-next-line react/no-array-index-key -- Legacy tiers have no persistent IDs.
           key={index}
           tier={tier}
           index={index}
@@ -967,12 +968,12 @@ function RuleConditionRow({
         return timeFunc
     }
   }
-  const sourceLabel =
-    condition.source === SOURCE_PARAM
-      ? t('Body param')
-      : condition.source === SOURCE_HEADER
-        ? t('Header')
-        : t('Time')
+  let sourceLabel = t('Time')
+  if (condition.source === SOURCE_PARAM) {
+    sourceLabel = t('Body param')
+  } else if (condition.source === SOURCE_HEADER) {
+    sourceLabel = t('Header')
+  }
 
   const handleSourceChange = (source: string) => {
     if (source === SOURCE_TIME) {
@@ -992,12 +993,10 @@ function RuleConditionRow({
   const renderTimeCondition = (timeCond: TimeCondition) => (
     <>
       <Select
-        items={[
-          ...TIME_FUNCS.map((fn) => ({
-            value: fn,
-            label: getTimeFuncLabel(fn),
-          })),
-        ]}
+        items={TIME_FUNCS.map((fn) => ({
+          value: fn,
+          label: getTimeFuncLabel(fn),
+        }))}
         value={timeCond.timeFunc}
         onValueChange={(value) =>
           onChange({ ...timeCond, timeFunc: value as TimeFunc })
@@ -1017,12 +1016,10 @@ function RuleConditionRow({
         </SelectContent>
       </Select>
       <Select
-        items={[
-          ...COMMON_TIMEZONES.map((tz) => ({
-            value: tz.value,
-            label: tz.label,
-          })),
-        ]}
+        items={COMMON_TIMEZONES.map((tz) => ({
+          value: tz.value,
+          label: tz.label,
+        }))}
         value={timeCond.timezone}
         onValueChange={(value) =>
           value !== null && onChange({ ...timeCond, timezone: value })
@@ -1045,12 +1042,10 @@ function RuleConditionRow({
         </SelectContent>
       </Select>
       <Select
-        items={[
-          ...matchOptions.map((option) => ({
-            value: option.value,
-            label: getMatchLabel(option.value),
-          })),
-        ]}
+        items={matchOptions.map((option) => ({
+          value: option.value,
+          label: getMatchLabel(option.value),
+        }))}
         value={timeCond.mode}
         onValueChange={(v) => v !== null && handleModeChange(v)}
       >
@@ -1111,12 +1106,10 @@ function RuleConditionRow({
         className='w-44'
       />
       <Select
-        items={[
-          ...matchOptions.map((option) => ({
-            value: option.value,
-            label: getMatchLabel(option.value),
-          })),
-        ]}
+        items={matchOptions.map((option) => ({
+          value: option.value,
+          label: getMatchLabel(option.value),
+        }))}
         value={phCond.mode}
         onValueChange={(v) => v !== null && handleModeChange(v)}
       >
@@ -1241,6 +1234,7 @@ function RuleGroupCard({
       <div className='space-y-2'>
         {group.conditions.map((condition, conditionIndex) => (
           <RuleConditionRow
+            // eslint-disable-next-line react/no-array-index-key -- Legacy conditions have no persistent IDs.
             key={conditionIndex}
             condition={condition}
             onChange={(next) => handleConditionChange(conditionIndex, next)}
@@ -1639,135 +1633,120 @@ export const TieredPricingEditor = memo(function TieredPricingEditor({
   onRequestRuleExprChange,
 }: TieredPricingEditorProps) {
   const { t } = useTranslation()
-  const [editorMode, setEditorMode] = useState<EditorMode>('visual')
+  // Backport the expression-preserving state flow from upstream d52bdc0.
   const [visualConfig, setVisualConfig] = useState<VisualConfig | null>(() =>
-    tryParseVisualConfig(currentExpr)
+    currentExpr
+      ? tryParseVisualConfig(currentExpr)
+      : createDefaultVisualConfig()
   )
+  const [editorMode, setEditorMode] = useState<EditorMode>(() =>
+    visualConfig ? 'visual' : 'raw'
+  )
+  const [baseExpr, setBaseExpr] = useState(currentExpr)
+  const [ruleExpr, setRuleExpr] = useState(currentRequestRuleExpr)
   const [rawExpr, setRawExpr] = useState(() =>
     combineBillingExpr(currentExpr || '', currentRequestRuleExpr || '')
   )
   const [requestRuleGroups, setRequestRuleGroups] = useState<
     RequestRuleGroup[]
   >(() => tryParseRequestRuleExpr(currentRequestRuleExpr) || [])
-  const initRef = useRef(false)
+  const loadedModel = useRef(modelName)
 
   useEffect(() => {
-    if (initRef.current) return
-    initRef.current = true
-    const parsedConfig = tryParseVisualConfig(currentExpr)
-    if (parsedConfig) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setVisualConfig(parsedConfig)
-      setEditorMode('visual')
-    } else if (currentExpr) {
-      setVisualConfig(null)
-      setEditorMode('raw')
-    } else {
-      setVisualConfig(createDefaultVisualConfig())
-    }
-    setRawExpr(
-      combineBillingExpr(currentExpr || '', currentRequestRuleExpr || '')
-    )
+    if (loadedModel.current === modelName) return
+    loadedModel.current = modelName
+    const parsedConfig = currentExpr
+      ? tryParseVisualConfig(currentExpr)
+      : createDefaultVisualConfig()
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setVisualConfig(parsedConfig)
+    setEditorMode(parsedConfig ? 'visual' : 'raw')
+    setBaseExpr(currentExpr)
+    setRuleExpr(currentRequestRuleExpr)
+    setRawExpr(combineBillingExpr(currentExpr, currentRequestRuleExpr))
     setRequestRuleGroups(tryParseRequestRuleExpr(currentRequestRuleExpr) || [])
-  }, [currentExpr, currentRequestRuleExpr])
-
-  useEffect(() => {
-    initRef.current = false
-  }, [modelName])
+  }, [modelName, currentExpr, currentRequestRuleExpr])
 
   const canUseVisualRules = useMemo(() => {
-    if (!currentRequestRuleExpr) return true
-    return tryParseRequestRuleExpr(currentRequestRuleExpr) !== null
-  }, [currentRequestRuleExpr])
+    if (!ruleExpr) return true
+    return tryParseRequestRuleExpr(ruleExpr) !== null
+  }, [ruleExpr])
 
-  const effectiveExpr = useMemo(() => {
-    if (editorMode === 'visual') {
-      return generateExprFromVisualConfig(visualConfig)
-    }
-    const { billingExpr } = splitBillingExprAndRequestRules(rawExpr)
-    return billingExpr
-  }, [editorMode, visualConfig, rawExpr])
+  const effectiveExpr = baseExpr
 
-  useEffect(() => {
-    if (effectiveExpr !== currentExpr) {
-      onBillingExprChange(effectiveExpr)
-    }
-  }, [effectiveExpr, currentExpr, onBillingExprChange])
-
-  useEffect(() => {
-    if (editorMode !== 'visual') return
-    const ruleExpr = buildRequestRuleExpr(requestRuleGroups)
-    if (ruleExpr !== currentRequestRuleExpr) {
-      onRequestRuleExprChange(ruleExpr)
-    }
-  }, [
-    editorMode,
-    requestRuleGroups,
-    currentRequestRuleExpr,
-    onRequestRuleExprChange,
-  ])
-
-  const handleVisualChange = useCallback((next: VisualConfig) => {
-    setVisualConfig(next)
-  }, [])
+  const handleVisualChange = useCallback(
+    (next: VisualConfig) => {
+      setVisualConfig(next)
+      const expression = generateExprFromVisualConfig(next)
+      setBaseExpr(expression)
+      onBillingExprChange(expression)
+    },
+    [onBillingExprChange]
+  )
 
   const handleRawChange = useCallback(
     (value: string) => {
       setRawExpr(value)
-      const { requestRuleExpr: ruleStr } =
-        splitBillingExprAndRequestRules(value)
-      onRequestRuleExprChange(ruleStr)
+      const split = splitBillingExprAndRequestRules(value)
+      setBaseExpr(split.billingExpr)
+      setRuleExpr(split.requestRuleExpr)
+      onBillingExprChange(split.billingExpr)
+      onRequestRuleExprChange(split.requestRuleExpr)
     },
-    [onRequestRuleExprChange]
+    [onBillingExprChange, onRequestRuleExprChange]
   )
 
   const handleModeChange = useCallback(
     (next: EditorMode) => {
+      if (next === editorMode) return
       if (next === 'visual') {
-        const { billingExpr, requestRuleExpr: ruleStr } =
-          splitBillingExprAndRequestRules(rawExpr)
-        const parsed = tryParseVisualConfig(billingExpr)
-        if (parsed) {
-          setVisualConfig(parsed)
-        } else {
-          setVisualConfig(createDefaultVisualConfig())
+        const parsed = baseExpr
+          ? tryParseVisualConfig(baseExpr)
+          : createDefaultVisualConfig()
+        if (!parsed) {
+          toast.error(
+            t(
+              'This expression cannot be edited visually without losing information.'
+            )
+          )
+          return
         }
-        const parsedGroups = tryParseRequestRuleExpr(ruleStr)
-        setRequestRuleGroups(parsedGroups || [])
-        onRequestRuleExprChange(ruleStr)
+        setVisualConfig(parsed)
+        setRequestRuleGroups(tryParseRequestRuleExpr(ruleExpr) || [])
       } else {
-        const expr = generateExprFromVisualConfig(visualConfig)
-        const ruleExpr = buildRequestRuleExpr(requestRuleGroups)
-        setRawExpr(combineBillingExpr(expr, ruleExpr) || expr)
+        setRawExpr(combineBillingExpr(baseExpr, ruleExpr))
       }
       setEditorMode(next)
     },
-    [rawExpr, visualConfig, requestRuleGroups, onRequestRuleExprChange]
+    [editorMode, baseExpr, ruleExpr, t]
   )
 
   const applyPreset = useCallback(
     (preset: Preset) => {
       const presetGroups = preset.requestRules || []
-      const ruleExpr = buildRequestRuleExpr(presetGroups)
-      const combined = combineBillingExpr(preset.expr, ruleExpr) || preset.expr
-      setRawExpr(combined)
+      const rules = buildRequestRuleExpr(presetGroups)
       const parsed = tryParseVisualConfig(preset.expr)
-      if (parsed) {
-        setVisualConfig(parsed)
-        setEditorMode('visual')
-      } else {
-        setEditorMode('raw')
-        setVisualConfig(null)
-      }
+      setRawExpr(combineBillingExpr(preset.expr, rules) || preset.expr)
+      setBaseExpr(preset.expr)
+      setRuleExpr(rules)
+      setVisualConfig(parsed)
+      setEditorMode(parsed ? 'visual' : 'raw')
       setRequestRuleGroups(presetGroups)
-      onRequestRuleExprChange(ruleExpr)
+      onBillingExprChange(preset.expr)
+      onRequestRuleExprChange(rules)
+    },
+    [onBillingExprChange, onRequestRuleExprChange]
+  )
+
+  const handleRuleGroupsChange = useCallback(
+    (next: RequestRuleGroup[]) => {
+      setRequestRuleGroups(next)
+      const rules = buildRequestRuleExpr(next)
+      setRuleExpr(rules)
+      onRequestRuleExprChange(rules)
     },
     [onRequestRuleExprChange]
   )
-
-  const handleRuleGroupsChange = useCallback((next: RequestRuleGroup[]) => {
-    setRequestRuleGroups(next)
-  }, [])
 
   return (
     <div className='space-y-5'>
@@ -1825,7 +1804,7 @@ export const TieredPricingEditor = memo(function TieredPricingEditor({
               </p>
             </div>
 
-            {currentRequestRuleExpr && !canUseVisualRules ? (
+            {ruleExpr && !canUseVisualRules ? (
               <Alert>
                 <AlertDescription className='text-xs'>
                   {t(
@@ -1837,6 +1816,7 @@ export const TieredPricingEditor = memo(function TieredPricingEditor({
               <>
                 {requestRuleGroups.map((group, groupIndex) => (
                   <RuleGroupCard
+                    // eslint-disable-next-line react/no-array-index-key -- Legacy groups have no persistent IDs.
                     key={groupIndex}
                     group={group}
                     index={groupIndex}
