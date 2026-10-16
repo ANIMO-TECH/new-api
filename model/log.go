@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/types"
 
@@ -384,6 +385,7 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 		Other:             otherStr,
 	}
 	err := createLog(log)
+	common.SetContextKey(c, constant.ContextKeyConsumeLogPersisted, err == nil)
 	if err != nil {
 		logger.LogError(c, "failed to record log: "+err.Error())
 	}

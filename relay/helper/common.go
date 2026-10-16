@@ -67,6 +67,9 @@ func ClaudeData(c *gin.Context, resp dto.ClaudeResponse) error {
 	if err != nil {
 		common.SysError("error marshalling stream response: " + err.Error())
 	} else {
+		if resp.Type == "message_stop" && deferStreamCompletion(c, resp.Type, string(jsonData)) {
+			return nil
+		}
 		c.Render(-1, common.CustomEvent{Data: fmt.Sprintf("event: %s\n", resp.Type)})
 		c.Render(-1, common.CustomEvent{Data: "data: " + string(jsonData)})
 	}
@@ -75,6 +78,9 @@ func ClaudeData(c *gin.Context, resp dto.ClaudeResponse) error {
 }
 
 func ClaudeChunkData(c *gin.Context, resp dto.ClaudeResponse, data string) {
+	if resp.Type == "message_stop" && deferStreamCompletion(c, resp.Type, data) {
+		return
+	}
 	if requestContextDone(c) {
 		return
 	}
@@ -85,6 +91,9 @@ func ClaudeChunkData(c *gin.Context, resp dto.ClaudeResponse, data string) {
 }
 
 func ResponseChunkData(c *gin.Context, resp dto.ResponsesStreamResponse, data string) error {
+	if (resp.Type == "response.completed" || resp.Type == "response.done" || resp.Type == "response.incomplete") && deferStreamCompletion(c, resp.Type, data) {
+		return nil
+	}
 	if requestContextDone(c) {
 		return fmt.Errorf("request context done: %w", c.Request.Context().Err())
 	}
@@ -95,6 +104,9 @@ func ResponseChunkData(c *gin.Context, resp dto.ResponsesStreamResponse, data st
 }
 
 func StringData(c *gin.Context, str string) error {
+	if c != nil && str == "[DONE]" && deferStreamCompletion(c, "", str) {
+		return nil
+	}
 	if c == nil || c.Writer == nil {
 		return errors.New("context or writer is nil")
 	}

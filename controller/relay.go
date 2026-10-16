@@ -216,6 +216,9 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			break
 		}
 		c.Request.Body = io.NopCloser(bodyStorage)
+		if common.LogConsumeEnabled && relayFormat != types.RelayFormatOpenAIRealtime {
+			helper.BeginStreamCompletion(c)
+		}
 
 		switch relayFormat {
 		case types.RelayFormatOpenAIRealtime:
@@ -229,6 +232,9 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 
 		if newAPIError == nil {
+			if err := helper.FinishStreamCompletion(c); err != nil {
+				logger.LogError(c, "failed to finish billed stream: "+err.Error())
+			}
 			relayInfo.LastError = nil
 			return
 		}

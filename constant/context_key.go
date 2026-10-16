@@ -3,6 +3,9 @@ package constant
 type ContextKey string
 
 const (
+	// Set only after the consume-log INSERT has committed.
+	ContextKeyConsumeLogPersisted ContextKey = "consume_log_persisted"
+
 	ContextKeyTokenCountMeta  ContextKey = "token_count_meta"
 	ContextKeyPromptTokens    ContextKey = "prompt_tokens"
 	ContextKeyEstimatedTokens ContextKey = "estimated_tokens"
