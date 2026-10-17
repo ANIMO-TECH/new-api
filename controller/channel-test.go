@@ -572,6 +572,10 @@ func settleTestQuota(info *relaycommon.RelayInfo, priceData hosttypes.PriceData,
 		}
 	}
 
+	channelRatio := priceData.GroupRatioInfo.ChannelRatio
+	if channelRatio == 0 {
+		channelRatio = 1
+	}
 	quota := 0
 	if !priceData.UsePrice {
 		quota = usage.PromptTokens + int(math.Round(float64(usage.CompletionTokens)*priceData.CompletionRatio))
@@ -579,10 +583,18 @@ func settleTestQuota(info *relaycommon.RelayInfo, priceData hosttypes.PriceData,
 		if priceData.ModelRatio != 0 && quota <= 0 {
 			quota = 1
 		}
-		return quota, nil
+		adjusted, clamp := common.QuotaRoundChecked(float64(quota) * channelRatio)
+		if info != nil && clamp != nil {
+			info.QuotaClamp = clamp
+		}
+		return adjusted, nil
 	}
 
-	return int(priceData.ModelPrice * common.QuotaPerUnit), nil
+	adjusted, clamp := common.QuotaFromFloatChecked(priceData.ModelPrice * common.QuotaPerUnit * channelRatio)
+	if info != nil && clamp != nil {
+		info.QuotaClamp = clamp
+	}
+	return adjusted, nil
 }
 
 func buildTestLogOther(c *gin.Context, info *relaycommon.RelayInfo, priceData hosttypes.PriceData, usage *dto.Usage, tieredResult *billingexpr.TieredResult) map[string]interface{} {

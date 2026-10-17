@@ -272,6 +272,15 @@ export const channelFormSchema = z
       .string()
       .optional()
       .refine(isOptionalProxyURL, ERROR_MESSAGES.INVALID_PROXY),
+    billing_ratio: z
+      .number()
+      .min(0.01, ERROR_MESSAGES.INVALID_BILLING_RATIO)
+      .max(1000, ERROR_MESSAGES.INVALID_BILLING_RATIO)
+      .refine(
+        (value) => Math.round(value * 100) / 100 === value,
+        ERROR_MESSAGES.INVALID_BILLING_RATIO
+      )
+      .optional(),
     http_protocol: z.enum(['auto', 'http1']).optional(),
     http2_connection_shards: z.number().int().optional(),
     pass_through_body_enabled: z.boolean().optional(),
@@ -486,6 +495,7 @@ export function transformChannelToFormDefaults(
     force_format: false,
     thinking_to_content: false,
     proxy: '',
+    billing_ratio: undefined as number | undefined,
     http_protocol: HTTP_PROTOCOL_AUTO as 'auto' | 'http1',
     http2_connection_shards: 1,
     pass_through_body_enabled: false,
@@ -504,6 +514,7 @@ export function transformChannelToFormDefaults(
         force_format: parsed.force_format || false,
         thinking_to_content: parsed.thinking_to_content || false,
         proxy: parsed.proxy || '',
+        billing_ratio: parsed.billing_ratio ?? undefined,
         http_protocol: protocol,
         http2_connection_shards: protocol === HTTP_PROTOCOL_HTTP1 ? 1 : shards,
         pass_through_body_enabled: parsed.pass_through_body_enabled || false,
@@ -629,6 +640,10 @@ export function buildSettingJSON(formData: ChannelFormValues): string {
     pass_through_body_enabled: formData.pass_through_body_enabled || false,
     system_prompt: formData.system_prompt || '',
     system_prompt_override: formData.system_prompt_override || false,
+  }
+
+  if (formData.billing_ratio != null && formData.billing_ratio !== 1) {
+    settingObj.billing_ratio = formData.billing_ratio
   }
 
   const protocol = normalizeHttpProtocol(formData.http_protocol)

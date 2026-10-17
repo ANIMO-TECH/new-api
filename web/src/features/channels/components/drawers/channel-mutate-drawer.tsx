@@ -284,6 +284,7 @@ const SENSITIVE_FORM_FIELDS = [
   'force_format',
   'thinking_to_content',
   'proxy',
+  'billing_ratio',
   'http_protocol',
   'http2_connection_shards',
   'pass_through_body_enabled',
@@ -336,6 +337,7 @@ function hasAdvancedSettingsValues(values: ChannelFormValues): boolean {
     values.priority ||
     values.weight ||
     values.proxy?.trim() ||
+    (values.billing_ratio != null && values.billing_ratio !== 1) ||
     values.system_prompt?.trim() ||
     values.force_format ||
     values.thinking_to_content ||
@@ -4362,6 +4364,42 @@ export function ChannelMutateDrawer({
                                   <FormDescription>
                                     {t(
                                       'Network proxy for this channel (supports HTTP, HTTPS, SOCKS5, and SOCKS5H)'
+                                    )}
+                                  </FormDescription>
+                                  <FormMessage />
+                                </FormItem>
+                              )}
+                            />
+
+                            <FormField
+                              control={form.control}
+                              name='billing_ratio'
+                              render={({ field }) => (
+                                <FormItem>
+                                  <FormLabel>{t('Billing Ratio')}</FormLabel>
+                                  <FormControl>
+                                    <Input
+                                      type='number'
+                                      min={0.01}
+                                      max={1000}
+                                      step='0.01'
+                                      placeholder='1.00'
+                                      name={field.name}
+                                      ref={field.ref}
+                                      onBlur={field.onBlur}
+                                      value={field.value ?? ''}
+                                      onChange={(event) =>
+                                        field.onChange(
+                                          event.target.value === ''
+                                            ? undefined
+                                            : event.target.valueAsNumber
+                                        )
+                                      }
+                                    />
+                                  </FormControl>
+                                  <FormDescription>
+                                    {t(
+                                      'Multiplies the model and group price for requests using this channel. Leave blank for 1.00.'
                                     )}
                                   </FormDescription>
                                   <FormMessage />

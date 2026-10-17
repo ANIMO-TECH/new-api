@@ -8,12 +8,22 @@ import (
 )
 
 type GroupRatioInfo struct {
+	ChannelRatio      float64
 	GroupRatio        float64
 	GroupSpecialRatio float64
 	HasSpecialRatio   bool
 }
 
+func (g GroupRatioInfo) EffectiveRatio() float64 {
+	r := g.ChannelRatio
+	if r == 0 {
+		r = 1
+	}
+	return g.GroupRatio * r
+}
+
 type PriceData struct {
+	QuotaBeforeGroup     float64
 	FreeModel            bool
 	ModelPrice           float64
 	ModelRatio           float64

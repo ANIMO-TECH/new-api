@@ -236,6 +236,8 @@ export const AUTO_BAN_OPTIONS = [
 // ============================================================================
 
 export const ERROR_MESSAGES = {
+  INVALID_BILLING_RATIO:
+    'Billing ratio must be between 0.01 and 1000 with at most two decimal places',
   REQUIRED_NAME: 'Channel name is required',
   REQUIRED_TYPE: 'Channel type is required',
   REQUIRED_KEY: 'API key is required',

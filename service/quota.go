@@ -181,7 +181,7 @@ func PostWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, mod
 	audioCompletionRatio := decimal.NewFromFloat(ratio_setting.GetAudioCompletionRatio(modelName))
 
 	modelRatio := relayInfo.PriceData.ModelRatio
-	groupRatio := relayInfo.PriceData.GroupRatioInfo.GroupRatio
+	groupRatio := relayInfo.PriceData.GroupRatioInfo.EffectiveRatio()
 	modelPrice := relayInfo.PriceData.ModelPrice
 	usePrice := relayInfo.PriceData.UsePrice
 
@@ -304,7 +304,7 @@ func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, u
 	audioCompletionRatio := decimal.NewFromFloat(ratio_setting.GetAudioCompletionRatio(relayInfo.OriginModelName))
 
 	modelRatio := relayInfo.PriceData.ModelRatio
-	groupRatio := relayInfo.PriceData.GroupRatioInfo.GroupRatio
+	groupRatio := relayInfo.PriceData.GroupRatioInfo.EffectiveRatio()
 	modelPrice := relayInfo.PriceData.ModelPrice
 	usePrice := relayInfo.PriceData.UsePrice
 

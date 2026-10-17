@@ -208,7 +208,7 @@ func composeTieredTextQuota(relayInfo *relaycommon.RelayInfo, summary textQuotaS
 	if tieredResult != nil {
 		if snap := relayInfo.TieredBillingSnapshot; snap != nil {
 			quota, clamp := common.QuotaFromDecimalChecked(decimal.NewFromFloat(tieredResult.ActualQuotaBeforeGroup).
-				Mul(decimal.NewFromFloat(snap.GroupRatio)).
+				Mul(decimal.NewFromFloat(snap.GroupRatio * snap.ChannelMultiplier())).
 				Add(summary.ToolCallSurchargeQuota))
 			noteQuotaClamp(relayInfo, clamp)
 			return quota
@@ -237,7 +237,7 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 		CacheRatio:           relayInfo.PriceData.CacheRatio,
 		ImageRatio:           relayInfo.PriceData.ImageRatio,
 		ModelRatio:           relayInfo.PriceData.ModelRatio,
-		GroupRatio:           relayInfo.PriceData.GroupRatioInfo.GroupRatio,
+		GroupRatio:           relayInfo.PriceData.GroupRatioInfo.EffectiveRatio(),
 		ModelPrice:           relayInfo.PriceData.ModelPrice,
 		CacheCreationRatio:   relayInfo.PriceData.CacheCreationRatio,
 		CacheCreationRatio5m: relayInfo.PriceData.CacheCreation5mRatio,

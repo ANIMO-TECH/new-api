@@ -1,6 +1,7 @@
 package service
 
 import (
+	"github.com/QuantumNous/new-api/common"
 	"net/http"
 
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
@@ -104,16 +105,17 @@ func refreshTieredBillingGroup(relayInfo *relaycommon.RelayInfo) (*billingexpr.B
 	}
 
 	groupRatio := relayInfo.PriceData.GroupRatioInfo.GroupRatio
-	if snap.GroupRatio == groupRatio {
+	if snap.GroupRatio == groupRatio && snap.ChannelRatio == relayInfo.PriceData.GroupRatioInfo.ChannelRatio {
 		return snap, nil
 	}
 
-	estimatedQuotaAfterGroup := snap.EstimatedQuotaBeforeGroup * groupRatio
+	estimatedQuotaAfterGroup := snap.EstimatedQuotaBeforeGroup * relayInfo.PriceData.GroupRatioInfo.EffectiveRatio()
 	estimatedQuota, err := billingexpr.QuotaRoundStrict(estimatedQuotaAfterGroup)
 	if err != nil {
 		return nil, err
 	}
 	snap.GroupRatio = groupRatio
+	snap.ChannelRatio = relayInfo.PriceData.GroupRatioInfo.ChannelRatio
 	snap.EstimatedQuotaAfterGroup = estimatedQuota
 	return snap, nil
 }
@@ -133,6 +135,24 @@ func PrepareTieredBillingForSelectedGroup(c *gin.Context, relayInfo *relaycommon
 		)
 	}
 	if snap == nil {
+		if relayInfo == nil || relayInfo.PriceData.QuotaBeforeGroup <= 0 {
+			return nil
+		}
+		target, quotaErr := common.QuotaFromFloatStrict(relayInfo.PriceData.QuotaBeforeGroup * relayInfo.PriceData.GroupRatioInfo.EffectiveRatio())
+		if quotaErr != nil {
+			return types.NewError(quotaErr, types.ErrorCodeModelPriceError, types.ErrOptionWithSkipRetry())
+		}
+		if target == 0 {
+			return nil
+		}
+		relayInfo.PriceData.FreeModel = false
+		if relayInfo.Billing == nil {
+			return PreConsumeBilling(c, target, relayInfo)
+		}
+		if reserveErr := relayInfo.Billing.Reserve(target); reserveErr != nil {
+			return types.NewError(reserveErr, types.ErrorCodeUpdateDataError, types.ErrOptionWithSkipRetry())
+		}
+		relayInfo.FinalPreConsumedQuota = relayInfo.Billing.GetPreConsumedQuota()
 		return nil
 	}
 	if snap.GroupRatio == 0 {
