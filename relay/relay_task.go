@@ -210,6 +210,12 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 		}
 	}
 
+	if info.Billing != nil && !info.PriceData.FreeModel {
+		if reserveErr := info.Billing.Reserve(info.PriceData.Quota); reserveErr != nil {
+			return nil, service.TaskErrorWrapperLocal(reserveErr, "billing_reserve_failed", http.StatusForbidden)
+		}
+		info.FinalPreConsumedQuota = info.Billing.GetPreConsumedQuota()
+	}
 	// 8. 构建请求体
 	requestBody, err := adaptor.BuildRequestBody(c, info)
 	if err != nil {

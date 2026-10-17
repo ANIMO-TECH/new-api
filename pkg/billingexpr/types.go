@@ -51,6 +51,7 @@ type BillingSnapshot struct {
 	ModelName                 string  `json:"model_name"`
 	ExprString                string  `json:"expr_string"`
 	ExprHash                  string  `json:"expr_hash"`
+	ChannelRatio              float64 `json:"channel_ratio,omitempty"`
 	GroupRatio                float64 `json:"group_ratio"`
 	EstimatedPromptTokens     int     `json:"estimated_prompt_tokens"`
 	EstimatedCompletionTokens int     `json:"estimated_completion_tokens"`
@@ -79,4 +80,12 @@ type TieredResult struct {
 func ExprHashString(expr string) string {
 	h := sha256.Sum256([]byte(expr))
 	return fmt.Sprintf("%x", h)
+}
+
+// ChannelMultiplier preserves pre-field snapshots as a 1x channel.
+func (s *BillingSnapshot) ChannelMultiplier() float64 {
+	if s.ChannelRatio == 0 {
+		return 1
+	}
+	return s.ChannelRatio
 }

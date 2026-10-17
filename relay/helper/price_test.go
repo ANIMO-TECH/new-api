@@ -6,8 +6,10 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/config"
@@ -271,4 +273,29 @@ func TestModelPriceHelperRequestBillingRatiosOnlyApplyToFixedPrice(t *testing.T)
 	require.Equal(t, "QuotaFromFloat", clamp.Op)
 	require.Equal(t, common.QuotaClampOverflow, clamp.Kind)
 	require.Nil(t, info.Billing)
+}
+
+func TestModelPriceHelperUsesSelectedChannelBillingRatio(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	saved := map[string]string{}
+	require.NoError(t, config.GlobalConfig.SaveToDB(func(k, v string) error { saved[k] = v; return nil }))
+	t.Cleanup(func() { require.NoError(t, config.GlobalConfig.LoadFromDB(saved)) })
+	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
+		"group_ratio_setting.group_ratio": `{"default":1}`,
+	}))
+	oldPrices := ratio_setting.ModelPrice2JSONString()
+	t.Cleanup(func() { require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(oldPrices)) })
+	require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(`{"channel-price-test":0.2}`))
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	info := &relaycommon.RelayInfo{OriginModelName: "channel-price-test", UsingGroup: "default", UserGroup: "default"}
+	for _, ratio := range []float64{0.5, 2, 1} {
+		common.SetContextKey(ctx, constant.ContextKeyChannelSetting, dto.ChannelSettings{BillingRatio: &ratio})
+		price, err := ModelPriceHelper(ctx, info, 100, &types.TokenCountMeta{})
+		require.NoError(t, err)
+		want, err := common.QuotaFromFloatStrict(100000 * ratio)
+		require.NoError(t, err)
+		require.Equal(t, want, price.QuotaToPreConsume)
+		require.Equal(t, float64(1), price.GroupRatioInfo.GroupRatio)
+		require.Equal(t, ratio, price.GroupRatioInfo.ChannelRatio)
+	}
 }

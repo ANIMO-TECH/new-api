@@ -177,6 +177,7 @@ export interface LogOtherData {
   model_ratio?: number
   completion_ratio?: number
   model_price?: number
+  channel_ratio?: number
   group_ratio?: number
   user_group_ratio?: number
   cache_ratio?: number

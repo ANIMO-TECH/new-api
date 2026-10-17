@@ -44,6 +44,7 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
 		other["model_ratio"] = info.PriceData.ModelRatio
 	}
 	other["group_ratio"] = info.PriceData.GroupRatioInfo.GroupRatio
+	other["channel_ratio"] = info.PriceData.GroupRatioInfo.ChannelRatio
 	if info.PriceData.GroupRatioInfo.HasSpecialRatio {
 		other["user_group_ratio"] = info.PriceData.GroupRatioInfo.GroupSpecialRatio
 	}
@@ -127,6 +128,9 @@ func taskBillingOther(task *model.Task) map[string]interface{} {
 			other["model_ratio"] = bc.ModelRatio
 		}
 		other["group_ratio"] = bc.GroupRatio
+		if bc.ChannelRatio != 0 {
+			other["channel_ratio"] = bc.ChannelRatio
+		}
 		if priceData := taskBillingContextPriceData(bc); priceData != nil {
 			for k, v := range priceData.OtherRatios() {
 				other[k] = v
@@ -142,11 +146,13 @@ func taskBillingOther(task *model.Task) map[string]interface{} {
 }
 
 func taskBillingContextPriceData(bc *model.TaskBillingContext) *types.PriceData {
-	if bc == nil || len(bc.OtherRatios) == 0 {
+	if bc == nil || (len(bc.OtherRatios) == 0 && bc.ChannelRatio == 0) {
 		return nil
 	}
 	priceData := &types.PriceData{}
-	if !priceData.ReplaceOtherRatios(bc.OtherRatios) {
+	priceData.ReplaceOtherRatios(bc.OtherRatios)
+	priceData.AddOtherRatio("channel_ratio", bc.ChannelRatio)
+	if len(priceData.OtherRatios()) == 0 {
 		return nil
 	}
 	return priceData

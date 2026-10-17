@@ -5302,6 +5302,9 @@
     "Notify on recovery": "恢复成功时通知",
     "Notify the root user when a probe restores a channel or key.": "探测恢复渠道或密钥时通知根用户。",
     "Notify when attempts are exhausted": "尝试次数耗尽时通知",
-    "Only applies when maximum attempts is greater than zero.": "仅在最大尝试次数大于 0 时生效。"
+    "Only applies when maximum attempts is greater than zero.": "仅在最大尝试次数大于 0 时生效。",
+    "Billing Ratio": "计费倍率",
+    "Multiplies the model and group price for requests using this channel. Leave blank for 1.00.": "在模型价格和分组倍率基础上，叠加此渠道的计费倍率。留空默认为 1.00。",
+    "Billing ratio must be between 0.01 and 1000 with at most two decimal places": "计费倍率须在 0.01 至 1000 之间，最多两位小数"
   }
 }

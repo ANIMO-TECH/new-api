@@ -2,6 +2,7 @@ package dto
 
 import (
 	"fmt"
+	"math"
 	"net/url"
 	"regexp"
 	"strings"
@@ -11,18 +12,40 @@ import (
 )
 
 type ChannelSettings struct {
-	ForceFormat            bool   `json:"force_format,omitempty"`
-	ThinkingToContent      bool   `json:"thinking_to_content,omitempty"`
-	Proxy                  string `json:"proxy"`
-	PassThroughBodyEnabled bool   `json:"pass_through_body_enabled,omitempty"`
-	SystemPrompt           string `json:"system_prompt,omitempty"`
-	SystemPromptOverride   bool   `json:"system_prompt_override,omitempty"`
+	BillingRatio           *float64 `json:"billing_ratio,omitempty"`
+	ForceFormat            bool     `json:"force_format,omitempty"`
+	ThinkingToContent      bool     `json:"thinking_to_content,omitempty"`
+	Proxy                  string   `json:"proxy"`
+	PassThroughBodyEnabled bool     `json:"pass_through_body_enabled,omitempty"`
+	SystemPrompt           string   `json:"system_prompt,omitempty"`
+	SystemPromptOverride   bool     `json:"system_prompt_override,omitempty"`
 	// HTTPProtocol controls outbound HTTP version negotiation for this channel.
 	// Accepted values: "", "auto" (default), "http1".
 	HTTPProtocol string `json:"http_protocol,omitempty"`
 	// HTTP2ConnectionShards spreads HTTP/2 traffic across N independent transports
 	// (1-8). Zero/unset means 1. Ignored when HTTPProtocol is "http1".
 	HTTP2ConnectionShards int `json:"http2_connection_shards,omitempty"`
+}
+
+// MaxChannelBillingRatio bounds administrator-configured billing multipliers.
+const MaxChannelBillingRatio = 1000.0
+
+func (s *ChannelSettings) ValidateBillingRatio() error {
+	if s == nil || s.BillingRatio == nil {
+		return nil
+	}
+	r := *s.BillingRatio
+	if math.IsNaN(r) || math.IsInf(r, 0) || r < 0.01 || r > MaxChannelBillingRatio || math.Round(r*100)/100 != r {
+		return fmt.Errorf("billing_ratio must be between 0.01 and 1000 with at most two decimal places")
+	}
+	return nil
+}
+
+func (s *ChannelSettings) BillingMultiplier() float64 {
+	if s == nil || s.BillingRatio == nil || s.ValidateBillingRatio() != nil {
+		return 1
+	}
+	return *s.BillingRatio
 }
 
 const (

@@ -82,6 +82,7 @@ export type Channel = z.infer<typeof channelSchema>
 // ============================================================================
 
 export interface ChannelSettings {
+  billing_ratio?: number
   force_format?: boolean
   thinking_to_content?: boolean
   proxy?: string

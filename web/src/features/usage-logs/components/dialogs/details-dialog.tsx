@@ -281,6 +281,13 @@ function BillingBreakdown(props: {
     }
   }
 
+  if (other.channel_ratio != null && Number.isFinite(other.channel_ratio)) {
+    rows.push({
+      label: t('Billing Ratio'),
+      value: `${formatRatio(other.channel_ratio)}x`,
+    })
+  }
+
   const userGR = other.user_group_ratio
   const isUserGR = userGR != null && Number.isFinite(userGR) && userGR !== -1
   const effectiveGR = isUserGR ? userGR : other.group_ratio

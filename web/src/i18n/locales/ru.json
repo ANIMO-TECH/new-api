@@ -5299,6 +5299,9 @@
     "Notify on recovery": "Notify on recovery",
     "Notify the root user when a probe restores a channel or key.": "Notify the root user when a probe restores a channel or key.",
     "Notify when attempts are exhausted": "Notify when attempts are exhausted",
-    "Only applies when maximum attempts is greater than zero.": "Only applies when maximum attempts is greater than zero."
+    "Only applies when maximum attempts is greater than zero.": "Only applies when maximum attempts is greater than zero.",
+    "Billing Ratio": "Billing Ratio",
+    "Multiplies the model and group price for requests using this channel. Leave blank for 1.00.": "Multiplies the model and group price for requests using this channel. Leave blank for 1.00.",
+    "Billing ratio must be between 0.01 and 1000 with at most two decimal places": "Billing ratio must be between 0.01 and 1000 with at most two decimal places"
   }
 }
