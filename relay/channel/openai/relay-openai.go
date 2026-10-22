@@ -11,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/relay/channel/openrouter"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/relayconvert"
@@ -117,6 +118,8 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 	var responseTextBuilder strings.Builder
 	var toolCount int
 	var usage = &dto.Usage{}
+	var streamErr *types.NewAPIError
+	var settlementFrame string
 	var lastStreamData string
 	var secondLastStreamData string // 存储倒数第二个stream data，用于音频模型
 	seenStreamToolCalls := make(map[string]struct{})
@@ -126,6 +129,25 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 	isAudioModel := strings.Contains(strings.ToLower(model), "audio")
 
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
+		if info.RelayMode == relayconstant.RelayModeChatCompletions {
+			var envelope struct {
+				Error *types.OpenAIError `json:"error"`
+				Usage *dto.Usage         `json:"usage"`
+			}
+			if err := common.UnmarshalJsonStr(data, &envelope); err != nil {
+				streamErr = invalidChatCompletionSettlementError()
+				sr.Stop(streamErr)
+				return
+			}
+			if envelope.Error != nil {
+				streamErr = chatCompletionUpstreamError(envelope.Error)
+				sr.Stop(streamErr)
+				return
+			}
+			if envelope.Usage != nil {
+				usage, containStreamUsage, settlementFrame = envelope.Usage, true, data
+			}
+		}
 		if lastStreamData != "" {
 			if err := HandleStreamFormat(c, info, lastStreamData, info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent); err != nil {
 				common.SysLog("error handling stream format: " + err.Error())
@@ -146,6 +168,10 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 			}
 		}
 	})
+
+	if streamErr != nil {
+		return nil, streamErr
+	}
 
 	// 对音频模型，从倒数第二个stream data中提取usage信息
 	if isAudioModel && secondLastStreamData != "" {
@@ -172,6 +198,17 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 		logger.LogError(c, fmt.Sprintf("error handling last response: %s, lastStreamData: [%s]", err.Error(), lastStreamData))
 	}
 
+	if info.RelayMode == relayconstant.RelayModeChatCompletions {
+		if err := validateChatCompletionSettlement(usage); err != nil {
+			// Client cancellation is not an invalid upstream settlement and must not ban a healthy channel.
+			if info.StreamStatus.EndReason == relaycommon.StreamEndReasonClientGone {
+				return &dto.Usage{}, nil
+			}
+			info.StreamStatus.RecordError(err.Error())
+			return nil, err
+		}
+	}
+
 	if info.RelayFormat == types.RelayFormatOpenAI {
 		if shouldSendLastResp {
 			_ = sendStreamData(c, info, lastStreamData, info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent)
@@ -183,7 +220,10 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 		usage.CompletionTokens += toolCount * 7
 	}
 
-	applyUsagePostProcessing(info, usage, common.StringToByteSlice(lastStreamData))
+	if settlementFrame == "" {
+		settlementFrame = lastStreamData
+	}
+	applyUsagePostProcessing(info, usage, common.StringToByteSlice(settlementFrame))
 
 	for _, name := range streamFunctionCallNames {
 		info.CountBillableToolCall(dto.BuildInCallFunctionCall, name)
@@ -249,7 +289,17 @@ func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
 
-	if oaiError := simpleResponse.GetOpenAIError(); oaiError != nil && oaiError.Type != "" {
+	if info.RelayMode == relayconstant.RelayModeChatCompletions {
+		if simpleResponse.Error != nil {
+			if upstreamError := simpleResponse.GetOpenAIError(); upstreamError != nil {
+				return nil, chatCompletionUpstreamError(upstreamError)
+			}
+			return nil, invalidChatCompletionSettlementError()
+		}
+		if err := validateChatCompletionSettlement(&simpleResponse.Usage); err != nil {
+			return nil, err
+		}
+	} else if oaiError := simpleResponse.GetOpenAIError(); oaiError != nil && oaiError.Type != "" {
 		return nil, types.WithOpenAIError(*oaiError, resp.StatusCode)
 	}
 
@@ -272,7 +322,7 @@ func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 	}
 
 	usageModified := false
-	if simpleResponse.Usage.PromptTokens == 0 {
+	if info.RelayMode != relayconstant.RelayModeChatCompletions && simpleResponse.Usage.PromptTokens == 0 {
 		completionTokens := simpleResponse.Usage.CompletionTokens
 		if completionTokens == 0 {
 			for _, choice := range simpleResponse.Choices {

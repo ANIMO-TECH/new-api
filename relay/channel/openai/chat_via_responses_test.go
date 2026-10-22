@@ -22,6 +22,9 @@ import (
 
 func newResponsesChatTestContext(t *testing.T, body string, isStream bool) (*gin.Context, *httptest.ResponseRecorder, *http.Response, *relaycommon.RelayInfo) {
 	t.Helper()
+	oldTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 30
+	t.Cleanup(func() { constant.StreamingTimeout = oldTimeout })
 
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
