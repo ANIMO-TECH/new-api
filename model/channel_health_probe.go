@@ -33,6 +33,17 @@ func ChannelKeyFingerprint(key string) string {
 	return hex.EncodeToString(common.Sha256Raw([]byte(key)))
 }
 
+func channelHealthProbeKeys(channel *Channel) []string {
+	if channel.ChannelInfo.IsMultiKey {
+		return channel.GetKeys()
+	}
+	if channel.Key == "" {
+		return nil
+	}
+	// A single credential may be a multiline OAuth JSON object.
+	return []string{channel.Key}
+}
+
 func RegisterChannelHealthProbe(channelID int, usingKey string, initialDelaySeconds int64) error {
 	channel, err := GetChannelById(channelID, true)
 	if err != nil {
@@ -93,7 +104,7 @@ func EnsureAutoDisabledChannelHealthProbes(initialDelaySeconds int64) error {
 		return err
 	}
 	for _, channel := range channels {
-		keys := channel.GetKeys()
+		keys := channelHealthProbeKeys(channel)
 		for index, key := range keys {
 			if channel.ChannelInfo.IsMultiKey && channel.ChannelInfo.MultiKeyStatusList[index] != common.ChannelStatusAutoDisabled {
 				continue
@@ -143,13 +154,14 @@ func ResolveChannelHealthProbeTarget(state *ChannelHealthProbeState) (*Channel, 
 	if err != nil {
 		return nil, "", false, err
 	}
-	for _, key := range channel.GetKeys() {
+	keys := channelHealthProbeKeys(channel)
+	for _, key := range keys {
 		if ChannelKeyFingerprint(key) != state.KeyFingerprint {
 			continue
 		}
 		if channel.ChannelInfo.IsMultiKey {
 			keyIndex := -1
-			for index, candidate := range channel.GetKeys() {
+			for index, candidate := range keys {
 				if candidate == key {
 					keyIndex = index
 					break

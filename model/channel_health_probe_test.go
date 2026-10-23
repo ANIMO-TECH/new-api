@@ -63,3 +63,73 @@ func TestRecordChannelHealthProbeFailureUsesGenerationCAS(t *testing.T) {
 	assert.Equal(t, 1, stored.ConsecutiveFailures)
 	assert.Equal(t, "bad_response", stored.LastErrorCode)
 }
+
+func TestHealthProbePreservesMultilineSingleCredential(t *testing.T) {
+	truncateTables(t)
+	credential := "{\n  \"access_token\": \"test-access\",\n  \"account_id\": \"test-account\"\n}"
+	channel := Channel{Name: "single-oauth-probe", Key: credential, Status: common.ChannelStatusAutoDisabled}
+	require.NoError(t, DB.Create(&channel).Error)
+	require.NoError(t, RegisterChannelHealthProbe(channel.Id, credential, 1))
+	require.NoError(t, EnsureAutoDisabledChannelHealthProbes(1))
+
+	states, err := ListDueChannelHealthProbes(common.GetTimestamp()+1, 10)
+	require.NoError(t, err)
+	require.Len(t, states, 1)
+	_, key, eligible, err := ResolveChannelHealthProbeTarget(states[0])
+	require.NoError(t, err)
+	assert.True(t, eligible)
+	assert.Equal(t, credential, key)
+	assert.Equal(t, ChannelKeyFingerprint(credential), states[0].KeyFingerprint)
+}
+
+func TestHealthProbeBackfillsFullCredentialAndRejectsLegacyFragment(t *testing.T) {
+	truncateTables(t)
+	credential := "{\n  \"access_token\": \"test-access\",\n  \"account_id\": \"test-account\"\n}"
+	channel := Channel{Name: "legacy-split-oauth-probe", Key: credential, Status: common.ChannelStatusAutoDisabled}
+	require.NoError(t, DB.Create(&channel).Error)
+	// The previous scanner incorrectly registered only the first JSON line.
+	require.NoError(t, RegisterChannelHealthProbe(channel.Id, "{", 1))
+	require.NoError(t, EnsureAutoDisabledChannelHealthProbes(1))
+
+	states, err := ListDueChannelHealthProbes(common.GetTimestamp()+1, 10)
+	require.NoError(t, err)
+	require.Len(t, states, 2)
+	for _, state := range states {
+		_, key, eligible, err := ResolveChannelHealthProbeTarget(state)
+		require.NoError(t, err)
+		if state.KeyFingerprint == ChannelKeyFingerprint("{") {
+			assert.False(t, eligible)
+			assert.Empty(t, key)
+			removed, err := RemoveChannelHealthProbeState(state)
+			require.NoError(t, err)
+			assert.True(t, removed)
+		} else {
+			assert.True(t, eligible)
+			assert.Equal(t, credential, key)
+		}
+	}
+	states, err = ListDueChannelHealthProbes(common.GetTimestamp()+1, 10)
+	require.NoError(t, err)
+	require.Len(t, states, 1)
+	assert.Equal(t, ChannelKeyFingerprint(credential), states[0].KeyFingerprint)
+}
+
+func TestHealthProbeBackfillStillSelectsOnlyAutoDisabledMultiKeys(t *testing.T) {
+	truncateTables(t)
+	channel := Channel{
+		Name: "multi-key-backfill", Key: "key-a\nkey-b", Status: common.ChannelStatusAutoDisabled,
+		ChannelInfo: ChannelInfo{
+			IsMultiKey: true, MultiKeySize: 2, MultiKeyMode: constant.MultiKeyModePolling,
+			MultiKeyStatusList: map[int]int{0: common.ChannelStatusManuallyDisabled, 1: common.ChannelStatusAutoDisabled},
+		},
+	}
+	require.NoError(t, DB.Create(&channel).Error)
+	require.NoError(t, EnsureAutoDisabledChannelHealthProbes(1))
+	states, err := ListDueChannelHealthProbes(common.GetTimestamp()+1, 10)
+	require.NoError(t, err)
+	require.Len(t, states, 1)
+	_, key, eligible, err := ResolveChannelHealthProbeTarget(states[0])
+	require.NoError(t, err)
+	assert.True(t, eligible)
+	assert.Equal(t, "key-b", key)
+}
